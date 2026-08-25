@@ -43,6 +43,12 @@ class RecoveryWorkflowState(TypedDict):
     action_reason: Optional[str]
     confidence_score: Optional[float]  # 0.0 to 1.0
     
+    # Policy check results (new fields)
+    policy_approved: Optional[bool]
+    policy_stopped_reason: Optional[str]
+    requires_human_approval: Optional[bool]
+    policy_rule_triggered: Optional[str]  # name of the rule that fired, or None
+    
     # Execution results
     razorpay_payment_link_id: Optional[str]
     action_status: Optional[str]  # 'pending', 'success', 'failed', 'stopped_by_rule'

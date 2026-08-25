@@ -32,6 +32,7 @@ from app.agents.nodes import (
     load_subscription_data,
     analyze_failure,
     decide_recovery_action,
+    check_policy_guards,
     execute_recovery_action,
     log_workflow_completion,
 )
@@ -50,6 +51,7 @@ def create_recovery_graph() -> StateGraph:
     workflow.add_node("load_data", lambda state: _wrap_node(load_subscription_data, state))
     workflow.add_node("analyze_failure", lambda state: _wrap_node(analyze_failure, state))
     workflow.add_node("decide_recovery_action", lambda state: _wrap_node(decide_recovery_action, state))
+    workflow.add_node("check_policy_guards", lambda state: _wrap_node(check_policy_guards, state))
     workflow.add_node("execute_recovery_action", lambda state: _wrap_node(execute_recovery_action, state))
     workflow.add_node("log_completion", lambda state: _wrap_node(log_workflow_completion, state))
     
@@ -59,16 +61,39 @@ def create_recovery_graph() -> StateGraph:
     # Define sequential edges
     workflow.add_edge("load_data", "analyze_failure")
     workflow.add_edge("analyze_failure", "decide_recovery_action")
+    workflow.add_edge("decide_recovery_action", "check_policy_guards")
     
-    # Conditional routing based on decided action type
-    # After decision, we route to execution (all paths converge there)
-    workflow.add_edge("decide_recovery_action", "execute_recovery_action")
+    # Conditional routing after policy check
+    workflow.add_conditional_edges(
+        "check_policy_guards",
+        _route_after_policy_check,
+        {
+            "execute": "execute_recovery_action",
+            "skip_to_audit": "log_completion"
+        }
+    )
+    
     workflow.add_edge("execute_recovery_action", "log_completion")
     
     # End after logging
     workflow.add_edge("log_completion", END)
     
     return workflow
+
+
+def _route_after_policy_check(state: RecoveryWorkflowState) -> str:
+    """
+    Conditional routing function after policy check node.
+    
+    If policy_approved is True, route to execute_recovery_action.
+    If policy_approved is False (stopped by rule), route directly to log_completion.
+    """
+    policy_approved = state.get("policy_approved", True)
+    
+    if policy_approved:
+        return "execute"
+    else:
+        return "skip_to_audit"
 
 
 def _wrap_node(node_func, state):
