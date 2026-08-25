@@ -2,12 +2,17 @@
 Payment Recovery Provider abstraction for ChurnGuard.
 
 This module defines the interface for payment operations (Razorpay integration).
-Currently implements a mock/stub provider for safe testing without real API calls.
+Implements both:
+- MockProvider (for testing/development)
+- RazorpayProvider (for production with real API calls)
 """
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentRecoveryProvider(ABC):
@@ -27,6 +32,9 @@ class PaymentRecoveryProvider(ABC):
         currency: str,
         customer_email: str,
         subscription_id: int,
+        failure_event_id: int,
+        customer_name: str,
+        plan_name: str,
         description: str = None
     ) -> Dict[str, Any]:
         """
@@ -83,6 +91,9 @@ class MockPaymentProvider(PaymentRecoveryProvider):
         currency: str,
         customer_email: str,
         subscription_id: int,
+        failure_event_id: int,
+        customer_name: str,
+        plan_name: str,
         description: str = None
     ) -> Dict[str, Any]:
         """
@@ -93,7 +104,7 @@ class MockPaymentProvider(PaymentRecoveryProvider):
         self.call_count += 1
         
         # Generate deterministic mock payment link ID
-        mock_link_id = f"pl_mock_{subscription_id}_{self.call_count}"
+        mock_link_id = f"pl_mock_{subscription_id}_{failure_event_id}_{self.call_count}"
         
         return {
             "payment_link_id": mock_link_id,
@@ -102,6 +113,7 @@ class MockPaymentProvider(PaymentRecoveryProvider):
             "amount": amount,
             "currency": currency,
             "customer_email": customer_email,
+            "customer_name": customer_name,
             "description": description or f"Payment recovery for subscription {subscription_id}",
             "is_simulated": True,
             "created_at": datetime.utcnow().isoformat(),
@@ -149,10 +161,10 @@ class MockPaymentProvider(PaymentRecoveryProvider):
 
 class RazorpayProvider(PaymentRecoveryProvider):
     """
-    Real Razorpay payment provider (placeholder for future integration).
+    Real Razorpay payment provider using the official Razorpay SDK.
     
-    Currently returns not-implemented errors to prevent accidental usage
-    before proper configuration and testing.
+    This provider makes actual API calls to Razorpay's test or live environment
+    based on the configured credentials.
     """
     
     def __init__(self, key_id: str = None, key_secret: str = None):
@@ -190,13 +202,62 @@ class RazorpayProvider(PaymentRecoveryProvider):
         currency: str,
         customer_email: str,
         subscription_id: int,
+        failure_event_id: int,
+        customer_name: str,
+        plan_name: str,
         description: str = None
     ) -> Dict[str, Any]:
-        """Create a real Razorpay payment link."""
-        raise NotImplementedError(
-            "RazorpayProvider not yet fully implemented. "
-            "Use MockPaymentProvider for now."
-        )
+        """
+        Create a real Razorpay payment link.
+        
+        Uses Razorpay's Payment Links API to generate a shareable link
+        that customers can use to complete their payment.
+        """
+        try:
+            client = self._get_client()
+            
+            # Build payment link payload per Razorpay API spec
+            payload = {
+                "amount": amount,  # Already in paise
+                "currency": currency,
+                "description": description or f"Payment recovery for {plan_name} - {customer_name}",
+                "customer": {
+                    "name": customer_name,
+                    "email": customer_email
+                },
+                "notify": {
+                    "sms": False,
+                    "email": True
+                },
+                "reminder_enable": True,
+                "reference_id": f"churnguard_{failure_event_id}_{subscription_id}",
+                "callback_url": None,  # Optional callback after payment
+                "callback_method": "get"  # Default method
+            }
+            
+            # Create payment link via Razorpay API
+            link = client.payment_link.create(payload)
+            
+            logger.info(f"Created Razorpay payment link: {link['id']} for subscription {subscription_id}")
+            
+            return {
+                "payment_link_id": link["id"],
+                "short_url": link["short_url"],
+                "status": link["status"],
+                "amount": link["amount"],
+                "currency": link["currency"],
+                "customer_email": customer_email,
+                "customer_name": customer_name,
+                "description": payload["description"],
+                "reference_id": payload["reference_id"],
+                "is_simulated": False,
+                "created_at": datetime.fromtimestamp(link.get("created_at", 0)).isoformat() if link.get("created_at") else datetime.utcnow().isoformat(),
+                "provider": "razorpay"
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to create Razorpay payment link: {str(e)}")
+            raise
     
     def retry_payment(
         self,
@@ -205,11 +266,25 @@ class RazorpayProvider(PaymentRecoveryProvider):
         amount: int,
         currency: str
     ) -> Dict[str, Any]:
-        """Retry payment via Razorpay."""
-        raise NotImplementedError(
-            "RazorpayProvider not yet fully implemented. "
-            "Use MockPaymentProvider for now."
-        )
+        """
+        Retry payment via Razorpay.
+        
+        Note: This is a placeholder for future implementation.
+        Actual retry logic would depend on how you store customer payment methods
+        and whether you're using Razorpay's recurring payment features.
+        """
+        # For now, return a not-implemented response
+        # Future implementation could use Razorpay's Subscriptions API or saved cards
+        return {
+            "success": False,
+            "payment_id": None,
+            "status": "not_implemented",
+            "amount": amount,
+            "currency": currency,
+            "is_simulated": False,
+            "message": "Automatic retry not yet implemented. Use payment links for customer-initiated retries.",
+            "provider": "razorpay"
+        }
     
     def get_provider_status(self) -> Dict[str, Any]:
         """Check Razorpay provider status."""
@@ -217,7 +292,8 @@ class RazorpayProvider(PaymentRecoveryProvider):
             "configured": bool(self.key_id and self.key_secret),
             "provider": "razorpay",
             "is_simulated": False,
-            "message": "RazorpayProvider configured but not yet implemented"
+            "key_id_prefix": self.key_id[:8] + "..." if self.key_id else None,
+            "message": "Razorpay provider configured and ready"
         }
 
 
@@ -239,6 +315,6 @@ def get_provider(use_mock: bool = True) -> PaymentRecoveryProvider:
     try:
         provider = RazorpayProvider()
         return provider
-    except (ValueError, ImportError):
-        # Return mock if real provider can't be initialized
+    except (ValueError, ImportError) as e:
+        logger.warning(f"Could not initialize RazorpayProvider: {e}. Falling back to MockProvider.")
         return MockPaymentProvider()

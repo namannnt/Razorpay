@@ -87,7 +87,10 @@ class TestAgentModules:
             amount=99900,
             currency="INR",
             customer_email="test@example.com",
-            subscription_id=1
+            subscription_id=1,
+            failure_event_id=1,
+            customer_name="Test Customer",
+            plan_name="Test Plan"
         )
         
         assert result["is_simulated"] is True

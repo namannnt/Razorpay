@@ -1,6 +1,11 @@
 ```
-# Database
-churnguard.db
+# Environment
+.env
+.env.local
+*.env.*
+
+# Database files
+*.db
 
 # Python
 __pycache__/
@@ -11,14 +16,19 @@ __pycache__/
 env/
 venv/
 .venv/
-.ENV
-.python-version
-*.pot
-*.po
-*~
-.pytest_cache/
-.mypy_cache/
+.venv*/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
 .coverage
 .coverage.*
-htmlcov/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db
 ```

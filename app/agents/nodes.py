@@ -440,9 +440,19 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
             currency=state.get("currency", "INR"),
             customer_email=state.get("customer_email", ""),
             subscription_id=state.get("subscription_id", 0),
+            failure_event_id=failure_event_id,
+            customer_name=state.get("customer_name", ""),
+            plan_name=state.get("plan_name", ""),
             description=reason_text
         )
         razorpay_link_id = link_result.get("payment_link_id")
+        payment_link_url = link_result.get("short_url")
+        
+        # Update the recovery action with payment link details
+        recovery_action.razorpay_payment_link_id = razorpay_link_id
+        recovery_action.payment_link_url = payment_link_url
+        db.commit()
+        
         state["execution_result"] = link_result
         state["action_status"] = RecoveryStatus.pending.value
         
