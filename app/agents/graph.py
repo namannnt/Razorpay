@@ -136,12 +136,14 @@ class RecoveryWorkflowRunner:
         if use_compiled:
             self._compiled_graph = self.graph_builder.compile()
     
-    def run(self, failure_event_id: int) -> dict:
+    def run(self, failure_event_id: int, db: Session = None) -> dict:
         """
         Execute the recovery workflow for a given failure event.
         
         Args:
             failure_event_id: ID of the failure event to process
+            db: Optional SQLAlchemy session. If provided, uses it directly.
+                If None, creates and manages its own session.
             
         Returns:
             dict containing workflow results including:
@@ -154,7 +156,12 @@ class RecoveryWorkflowRunner:
         """
         from app.database import SessionLocal
         
-        db = SessionLocal()
+        # Track whether we created the session ourselves
+        db_created_here = False
+        if db is None:
+            db = SessionLocal()
+            db_created_here = True
+        
         try:
             # Initialize state
             initial_state = RecoveryWorkflowState(
@@ -206,7 +213,9 @@ class RecoveryWorkflowRunner:
                 "audit_log_ids": [],
             }
         finally:
-            db.close()
+            # Only close the session if we created it ourselves
+            if db_created_here and db is not None:
+                db.close()
     
     def _run_manual(self, state: RecoveryWorkflowState, db: Session) -> RecoveryWorkflowState:
         """Run workflow manually without compiled graph (for testing/debugging)."""
@@ -246,7 +255,7 @@ class RecoveryWorkflowRunner:
 
 
 # Convenience function for API layer
-def run_recovery_workflow(failure_event_id: int) -> dict:
+def run_recovery_workflow(failure_event_id: int, db: Session = None) -> dict:
     """
     Run the recovery workflow for a failure event.
     
@@ -254,9 +263,11 @@ def run_recovery_workflow(failure_event_id: int) -> dict:
     
     Args:
         failure_event_id: ID of the failure event to process
+        db: Optional SQLAlchemy session. If provided, uses it directly.
+            If None, creates and manages its own session.
         
     Returns:
         dict with workflow results
     """
     runner = RecoveryWorkflowRunner(use_compiled=False)  # Manual mode for simplicity
-    return runner.run(failure_event_id)
+    return runner.run(failure_event_id, db=db)
