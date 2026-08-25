@@ -86,6 +86,7 @@ class RecoveryAction(Base):
     status = Column(SQLEnum(RecoveryStatus), default=RecoveryStatus.pending)
     reason_text = Column(String, nullable=True)
     razorpay_payment_link_id = Column(String, nullable=True)
+    payment_link_url = Column(String, nullable=True)  # The actual customer-facing URL
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
 
