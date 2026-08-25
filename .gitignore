@@ -1,4 +1,7 @@
 ```
+# Database
+churnguard.db
+
 # Python
 __pycache__/
 *.pyc
@@ -9,54 +12,13 @@ env/
 venv/
 .venv/
 .ENV
-.ENV.local
-.env
-.env.local
-.env.*
-.venv.bak/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
+.python-version
 *.pot
-*.pyc
-*.pyo
+*.po
 *~
 .pytest_cache/
 .mypy_cache/
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+.coverage
+.coverage.*
+htmlcov/
 ```

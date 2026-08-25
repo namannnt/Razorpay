@@ -477,6 +477,283 @@ class TestWorkflowExecution:
         assert len(actions) == 2
 
 
+class TestPolicyGuards:
+    """Test the policy/guardrail node functionality."""
+    
+    @pytest.fixture
+    def db_session(self):
+        """Create a fresh database session."""
+        from app.database import SessionLocal, Base, engine
+        # Recreate tables for clean state
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+    
+    def test_policy_max_retries_forces_escalation(self, db_session):
+        """Test that retry_count >= 3 forces escalation to manual review."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode, RecoveryAction
+        from app.agents.nodes import check_policy_guards
+        from app.database import ActionType
+        
+        # Create subscription and failure event with retry_count=3
+        sub = create_subscription(
+            db=db_session,
+            customer_name="Max Retry Test",
+            customer_email="maxretry@example.com",
+            plan_name="Basic",
+            amount=99900
+        )
+        
+        failure = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=3  # At max retries
+        )
+        
+        # Set up state as if decide_recovery_action recommended retry_now
+        state = {
+            "subscription_id": sub.id,
+            "failure_event_id": failure.id,
+            "recommended_action_type": ActionType.retry_now.value,
+            "action_reason": "Initial retry recommendation",
+            "retry_count": 3,
+            "amount": 99900,
+            "policy_approved": None,
+            "policy_stopped_reason": None,
+            "requires_human_approval": None,
+            "action_status": None,
+        }
+        
+        # Run policy check
+        result = check_policy_guards(state, db_session)
+        
+        # Should have overridden to escalate
+        assert result["recommended_action_type"] == ActionType.escalate.value
+        assert "max retry" in result["action_reason"].lower() or "escalat" in result["action_reason"].lower()
+        assert result["requires_human_approval"] is True
+    
+    def test_policy_quiet_hours_stops_action(self, db_session):
+        """Test that quiet hours rule stops send_update_link actions."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode
+        from app.agents.nodes import check_policy_guards
+        from app.database import ActionType, RecoveryStatus
+        from datetime import datetime
+        
+        # Create subscription and failure event
+        sub = create_subscription(
+            db=db_session,
+            customer_name="Quiet Hours Test",
+            customer_email="quiet@example.com",
+            plan_name="Basic",
+            amount=99900
+        )
+        
+        failure = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.card_expired,
+            retry_count=0
+        )
+        
+        # Set up state with send_update_link action
+        state = {
+            "subscription_id": sub.id,
+            "failure_event_id": failure.id,
+            "recommended_action_type": ActionType.send_update_link.value,
+            "action_reason": "Card expired - send payment link",
+            "retry_count": 0,
+            "amount": 99900,
+            "policy_approved": None,
+            "policy_stopped_reason": None,
+            "requires_human_approval": None,
+            "policy_rule_triggered": None,
+            "action_status": None,
+        }
+        
+        # Run policy check
+        result = check_policy_guards(state, db_session)
+        
+        # Check current IST hour
+        ist_hour = (datetime.utcnow().hour + 5) % 24
+        
+        # If we're in quiet hours, should be stopped
+        if ist_hour >= 21 or ist_hour < 8:
+            assert result["policy_approved"] is False
+            assert result["policy_stopped_reason"] is not None
+            assert "quiet hours" in result["policy_stopped_reason"].lower()
+            assert result["policy_rule_triggered"] == "quiet_hours"
+            # Note: action_status is set by execute_recovery_action, not policy_check
+        else:
+            # Outside quiet hours, should pass through
+            assert result["policy_approved"] is True
+            assert result["policy_rule_triggered"] is None
+    
+    def test_policy_high_value_requires_approval(self, db_session):
+        """Test that high-value transactions (>₹5000) require human approval."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode
+        from app.agents.nodes import check_policy_guards
+        from app.database import ActionType, RecoveryStatus
+        
+        # Create subscription with high value (>500000 paise = >₹5000)
+        sub = create_subscription(
+            db=db_session,
+            customer_name="High Value Test",
+            customer_email="highvalue@example.com",
+            plan_name="Premium",
+            amount=600000  # ₹6000
+        )
+        
+        failure = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=0
+        )
+        
+        # Set up state with any action
+        state = {
+            "subscription_id": sub.id,
+            "failure_event_id": failure.id,
+            "recommended_action_type": ActionType.retry_now.value,
+            "action_reason": "Retry attempt",
+            "retry_count": 0,
+            "amount": 600000,  # High value
+            "policy_approved": None,
+            "policy_stopped_reason": None,
+            "requires_human_approval": None,
+            "policy_rule_triggered": None,
+            "action_status": None,
+        }
+        
+        # Run policy check
+        result = check_policy_guards(state, db_session)
+        
+        # Should be stopped for human approval
+        assert result["policy_approved"] is False
+        assert "high-value" in result["policy_stopped_reason"].lower() or "human approval" in result["policy_stopped_reason"].lower()
+        assert result["requires_human_approval"] is True
+        assert result["policy_rule_triggered"] == "high_value_approval"
+    
+    def test_policy_repeated_failure_forces_escalation(self, db_session):
+        """Test that 2+ prior failures force escalation."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode
+        from app.agents.nodes import check_policy_guards
+        from app.database import ActionType
+        
+        # Create subscription
+        sub = create_subscription(
+            db=db_session,
+            customer_name="Repeated Failure Test",
+            customer_email="repeated@example.com",
+            plan_name="Basic",
+            amount=99900
+        )
+        
+        # Create 2 prior failure events
+        failure1 = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=0
+        )
+        
+        failure2 = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=0
+        )
+        
+        # Create current (3rd) failure event
+        failure3 = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=0
+        )
+        
+        # Set up state recommending retry
+        state = {
+            "subscription_id": sub.id,
+            "failure_event_id": failure3.id,
+            "recommended_action_type": ActionType.retry_now.value,
+            "action_reason": "Retry attempt",
+            "retry_count": 0,
+            "amount": 99900,
+            "policy_approved": None,
+            "policy_stopped_reason": None,
+            "requires_human_approval": None,
+            "action_status": None,
+        }
+        
+        # Run policy check
+        result = check_policy_guards(state, db_session)
+        
+        # Should force escalate due to repeated failures
+        assert result["recommended_action_type"] == ActionType.escalate.value
+        assert "repeated" in result["action_reason"].lower() or "escalat" in result["action_reason"].lower()
+        assert result["requires_human_approval"] is True
+    
+    def test_policy_no_rule_triggered_passes_through(self, db_session):
+        """Test that when no rules match, action passes through unchanged."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode
+        from app.agents.nodes import check_policy_guards
+        from app.database import ActionType
+        
+        # Create normal subscription (low value, first failure)
+        sub = create_subscription(
+            db=db_session,
+            customer_name="Normal Test",
+            customer_email="normal@example.com",
+            plan_name="Basic",
+            amount=99900  # ₹999 - normal value
+        )
+        
+        failure = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.insufficient_funds,
+            retry_count=0  # First attempt
+        )
+        
+        # Set up state with reasonable action
+        original_action = ActionType.retry_after_24h.value
+        original_reason = "Scheduled retry after 24 hours"
+        
+        state = {
+            "subscription_id": sub.id,
+            "failure_event_id": failure.id,
+            "recommended_action_type": original_action,
+            "action_reason": original_reason,
+            "retry_count": 0,
+            "amount": 99900,
+            "policy_approved": None,
+            "policy_stopped_reason": None,
+            "requires_human_approval": None,
+            "action_status": None,
+        }
+        
+        # Run policy check
+        result = check_policy_guards(state, db_session)
+        
+        # Should pass through unchanged
+        assert result["policy_approved"] is True
+        assert result["policy_stopped_reason"] is None
+        assert result["recommended_action_type"] == original_action
+        assert result["action_reason"] == original_reason
+        assert result["requires_human_approval"] is False
+
+
 class TestAPIEndpoint:
     """Test the /recovery/run/{failure_event_id} API endpoint."""
     

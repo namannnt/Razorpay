@@ -250,6 +250,105 @@ def decide_recovery_action(state: RecoveryWorkflowState, db: Session = None) -> 
     return state
 
 
+def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWorkflowState:
+    """
+    Policy/guardrail node that applies business rules before executing recovery actions.
+    
+    This node is inserted between decide_recovery_action and execute_recovery_action.
+    It applies the following rules IN ORDER (first match wins, no further rules checked):
+    
+    a. "max_retries" — if retry_count >= 3: force action_type to escalate
+    b. "quiet_hours" — if hour >= 21 or < 8 (IST approximation), stop send_update_link
+    c. "high_value_approval" — if amount > 500000 paise (₹5000), require human approval
+    d. "repeated_failure_pattern" — if subscription has 2+ prior FailureEvents, force escalate
+    
+    If none match: policy_approved=True, policy_rule_triggered=None, action passes through unchanged.
+    """
+    from app.services import get_subscription_by_id
+    from app.database import ActionType, RecoveryStatus
+    
+    # Initialize policy fields with defaults (pass-through)
+    state["policy_approved"] = True
+    state["policy_stopped_reason"] = None
+    state["requires_human_approval"] = False
+    state["policy_rule_triggered"] = None
+    
+    # Get current values
+    action_type_str = state.get("recommended_action_type")
+    retry_count = state.get("retry_count", 0)
+    amount = state.get("amount", 0)
+    subscription_id = state.get("subscription_id")
+    
+    if not action_type_str:
+        state["error_message"] = "No action_type to validate against policy"
+        return state
+    
+    # Convert string to ActionType enum for comparison
+    try:
+        current_action = ActionType(action_type_str)
+    except ValueError:
+        state["error_message"] = f"Invalid action_type: {action_type_str}"
+        return state
+    
+    # ========== Rule a: max_retries ==========
+    # If retry_count >= 3, override any retry_now action to escalate
+    if retry_count >= 3:
+        if current_action == ActionType.retry_now:
+            state["recommended_action_type"] = ActionType.escalate.value
+            state["action_reason"] = "Max retry limit (3) reached — escalating to manual review instead of further automated retries"
+            state["policy_approved"] = True  # Policy approved the override (not stopped, just redirected)
+            state["policy_rule_triggered"] = "max_retries"
+            state["requires_human_approval"] = True
+            return state
+    
+    # ========== Rule b: quiet_hours ==========
+    # If current IST hour is >= 21 or < 8, block send_update_link actions
+    # Using UTC hour with adjustment: IST = UTC + 5:30
+    # For simplicity, we approximate: if UTC hour is 16-22, it's roughly 9PM-8AM IST
+    # More precisely: IST hour = (UTC hour + 5.5) % 24
+    utc_hour = datetime.utcnow().hour
+    ist_hour = (utc_hour + 5) % 24  # Approximate IST hour (ignoring the 30 min)
+    
+    if (ist_hour >= 21 or ist_hour < 8):
+        if current_action == ActionType.send_update_link:
+            # Block customer communication during quiet hours
+            state["policy_approved"] = False
+            state["policy_stopped_reason"] = f"Quiet hours rule: Customer communication (send_update_link) paused during 9PM-8AM IST — rescheduled for next morning (current IST hour approx: {ist_hour})"
+            state["policy_rule_triggered"] = "quiet_hours"
+            # Do NOT change recommended_action_type, just block execution
+            return state
+    
+    # ========== Rule c: high_value_approval ==========
+    # If amount > 500000 paise (₹5000), require human approval
+    if amount and amount > 500000:
+        state["policy_approved"] = False
+        state["policy_stopped_reason"] = f"Transaction amount ₹{amount/100:.2f} exceeds auto-approval threshold of ₹5000 — requires human approval before any automated action"
+        state["policy_rule_triggered"] = "high_value_approval"
+        state["requires_human_approval"] = True
+        return state
+    
+    # ========== Rule d: repeated_failure_pattern ==========
+    # If subscription has 2+ prior FailureEvents, force escalate
+    if subscription_id:
+        subscription = get_subscription_by_id(db, subscription_id)
+        if subscription:
+            # Count all failure events for this subscription
+            total_failures = len(subscription.failure_events)
+            # If 2 or more failures exist (including current one), trigger rule
+            if total_failures >= 2:
+                state["recommended_action_type"] = ActionType.escalate.value
+                state["action_reason"] = f"This subscription has failed {total_failures} times — escalating to manual review rather than continuing automated recovery"
+                state["policy_approved"] = True  # Policy approved the override
+                state["policy_rule_triggered"] = "repeated_failure_pattern"
+                state["requires_human_approval"] = True
+                return state
+    
+    # No rules matched - pass through unchanged with policy_approved=True
+    state["policy_approved"] = True
+    state["policy_rule_triggered"] = None
+    return state
+
+
 def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> RecoveryWorkflowState:
     """
     Execute the decided recovery action.
@@ -260,6 +359,10 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
     3. Updates state with execution results
     
     Does NOT make real payments - uses MockProvider by default.
+    
+    Handles policy_stopped_reason from check_policy_guards node:
+    - If policy_approved is False, creates RecoveryAction with status=stopped_by_rule
+    - Otherwise proceeds with normal execution
     """
     from app.services import create_recovery_action, create_audit_log
     from app.agents.provider import get_provider
@@ -269,6 +372,10 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
     if not action_type_str:
         state["error_message"] = "No action_type decided - cannot execute"
         return state
+    
+    # Check if policy stopped this action
+    policy_approved = state.get("policy_approved", True)
+    policy_stopped_reason = state.get("policy_stopped_reason")
     
     # Convert string to ActionType enum
     try:
@@ -293,6 +400,33 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
         return state
     
     state["recovery_action_id"] = recovery_action.id
+    
+    # Handle policy-stopped actions (skip actual execution)
+    if not policy_approved and policy_stopped_reason:
+        # Update the action status to stopped_by_rule
+        from app.services import update_recovery_action_status
+        update_recovery_action_status(
+            db=db,
+            recovery_action_id=recovery_action.id,
+            status=RecoveryStatus.stopped_by_rule,
+            reason_text=policy_stopped_reason
+        )
+        state["action_status"] = RecoveryStatus.stopped_by_rule.value
+        state["execution_result"] = {"stopped_by_policy": True, "reason": policy_stopped_reason}
+        
+        # Log audit entry for policy stop
+        audit_log = create_audit_log(
+            db=db,
+            entity_type=EntityType.recovery_action,
+            entity_id=recovery_action.id,
+            event_description=f"Recovery action stopped by policy guard: {policy_stopped_reason}"
+        )
+        if audit_log:
+            if state.get("audit_log_ids") is None:
+                state["audit_log_ids"] = []
+            state["audit_log_ids"].append(audit_log.id)
+        
+        return state
     
     # Initialize provider (mock by default)
     provider = get_provider(use_mock=True)
@@ -359,11 +493,37 @@ def log_workflow_completion(state: RecoveryWorkflowState, db: Session) -> Recove
     Final node: Log workflow completion and cleanup.
     
     Records final audit entries and marks workflow as complete.
+    If a policy rule was triggered, logs which rule fired and why.
     """
     from app.services import create_audit_log, update_recovery_action_status
     from app.database import EntityType, RecoveryStatus
     
     state["workflow_completed_at"] = datetime.utcnow()
+    
+    # Log policy rule trigger if applicable (separate from normal workflow steps)
+    policy_rule_triggered = state.get("policy_rule_triggered")
+    if policy_rule_triggered:
+        policy_stopped_reason = state.get("policy_stopped_reason", "")
+        policy_approved = state.get("policy_approved", True)
+        
+        if policy_approved:
+            # Policy approved an override (e.g., max_retries, repeated_failure_pattern)
+            event_desc = f"Policy guard '{policy_rule_triggered}' triggered: action overridden but approved. Reason: {policy_stopped_reason or 'N/A'}"
+        else:
+            # Policy blocked execution (e.g., quiet_hours, high_value_approval)
+            event_desc = f"Policy guard '{policy_rule_triggered}' triggered: action BLOCKED. Reason: {policy_stopped_reason}"
+        
+        audit_log = create_audit_log(
+            db=db,
+            entity_type=EntityType.failure_event,
+            entity_id=state.get("failure_event_id", 0),
+            event_description=event_desc
+        )
+        
+        if audit_log:
+            if state.get("audit_log_ids") is None:
+                state["audit_log_ids"] = []
+            state["audit_log_ids"].append(audit_log.id)
     
     # Log workflow completion
     error_msg = state.get("error_message")
@@ -384,17 +544,18 @@ def log_workflow_completion(state: RecoveryWorkflowState, db: Session) -> Recove
             # Keep as pending since we're simulating
             pass
     
-    # Create final audit log
-    audit_log = create_audit_log(
-        db=db,
-        entity_type=EntityType.failure_event,
-        entity_id=state.get("failure_event_id", 0),
-        event_description=event_desc
-    )
-    
-    if audit_log:
-        if state.get("audit_log_ids") is None:
-            state["audit_log_ids"] = []
-        state["audit_log_ids"].append(audit_log.id)
+    # Create final audit log (if not already created for policy rule)
+    if not policy_rule_triggered:
+        audit_log = create_audit_log(
+            db=db,
+            entity_type=EntityType.failure_event,
+            entity_id=state.get("failure_event_id", 0),
+            event_description=event_desc
+        )
+        
+        if audit_log:
+            if state.get("audit_log_ids") is None:
+                state["audit_log_ids"] = []
+            state["audit_log_ids"].append(audit_log.id)
     
     return state
