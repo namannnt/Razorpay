@@ -118,7 +118,7 @@ def run_recovery_workflow(failure_event_id: int, db: Session = Depends(get_db)):
     
     # Run the recovery workflow
     try:
-        result = run_workflow(failure_event_id)
+        result = run_workflow(failure_event_id, db=db)
         
         # Handle errors from workflow
         if not result.get("success") and result.get("error"):
@@ -363,7 +363,7 @@ def run_batch_recovery(
         
         try:
             # Run the recovery workflow
-            result = run_recovery_workflow(failure_event.id)
+            result = run_recovery_workflow(failure_event.id, db=db)
             
             # Count action types
             action_taken = result.get("action_taken")
