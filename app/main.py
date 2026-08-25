@@ -1,7 +1,7 @@
 """
 ChurnGuard - AI Agent for Subscription Payment Recovery
 
-FastAPI backend entrypoint with basic CRUD endpoints.
+FastAPI backend entrypoint with basic CRUD endpoints and LangGraph recovery workflow.
 Business logic is kept in service layer for LangGraph agent integration.
 """
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -76,6 +76,65 @@ def generate_synthetic_data(db: Session = Depends(get_db)):
 def list_audit_logs(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """List all audit log entries with pagination."""
     return services.get_all_audit_logs(db, skip=skip, limit=limit)
+
+
+# Recovery Workflow Endpoint
+@app.post("/recovery/run/{failure_event_id}")
+def run_recovery_workflow(failure_event_id: int, db: Session = Depends(get_db)):
+    """
+    Run the AI-powered recovery workflow for a specific failure event.
+    
+    This endpoint:
+    1. Validates that the failure event exists
+    2. Loads the associated subscription
+    3. Runs the LangGraph workflow (analyze -> decide -> execute)
+    4. Persists the RecoveryAction record
+    5. Writes AuditLog entries
+    6. Returns structured results
+    
+    IMPORTANT: All operations are simulated (mock provider). No real payments are processed.
+    """
+    from app.agents import run_recovery_workflow as run_workflow
+    from app.services import get_failure_event_by_id
+    
+    # Validate failure event exists
+    failure_event = get_failure_event_by_id(db, failure_event_id)
+    if not failure_event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Failure event {failure_event_id} not found"
+        )
+    
+    # Check if subscription exists
+    subscription = services.get_subscription_by_id(db, failure_event.subscription_id)
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Subscription {failure_event.subscription_id} not found"
+        )
+    
+    # Run the recovery workflow
+    try:
+        result = run_workflow(failure_event_id)
+        
+        # Handle errors from workflow
+        if not result.get("success") and result.get("error"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result.get("error")
+            )
+        
+        return {
+            "success": True,
+            "workflow_result": result,
+            "message": f"Recovery action '{result.get('action_taken')}' initiated (simulated)"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Workflow execution failed: {str(e)}"
+        )
 
 
 # Health check endpoint
