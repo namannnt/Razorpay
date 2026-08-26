@@ -899,3 +899,147 @@ class TestExistingTestsStillPass:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestMetricsAndDemoEndpoints:
+    """Test the new /metrics/summary and /demo/simulate-payment endpoints."""
+
+    @pytest.fixture
+    def db_session(self):
+        """Create a fresh database session."""
+        from app.database import SessionLocal, Base, engine
+        # Recreate tables for clean state
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def test_metrics_summary_endpoint_empty(self, db_session):
+        """Test /metrics/summary returns zeros when no data exists."""
+        from app.main import get_metrics_summary
+        
+        result = get_metrics_summary(db=db_session)
+        
+        assert result["total_failed"] == 0
+        assert result["total_recovered"] == 0
+        assert result["total_at_risk_amount"] == 0
+        assert result["total_recovered_amount"] == 0
+        assert result["recovery_rate_pct"] == 0.0
+
+    def test_metrics_summary_endpoint_with_data(self, db_session):
+        """Test /metrics/summary returns correct values with data."""
+        from app.services import create_subscription, create_failure_event
+        from app.database import SubscriptionStatus, FailureCode
+        
+        # Create failed subscriptions
+        sub1 = create_subscription(
+            db=db_session,
+            customer_name="Failed User 1",
+            customer_email="failed1@example.com",
+            plan_name="Basic",
+            amount=99900  # ₹999
+        )
+        sub1.status = SubscriptionStatus.failed
+        db_session.commit()
+        
+        sub2 = create_subscription(
+            db=db_session,
+            customer_name="Failed User 2",
+            customer_email="failed2@example.com",
+            plan_name="Pro",
+            amount=199900  # ₹1999
+        )
+        sub2.status = SubscriptionStatus.failed
+        db_session.commit()
+        
+        # Create recovered subscription
+        sub3 = create_subscription(
+            db=db_session,
+            customer_name="Recovered User",
+            customer_email="recovered@example.com",
+            plan_name="Enterprise",
+            amount=499900  # ₹4999
+        )
+        sub3.status = SubscriptionStatus.recovered
+        db_session.commit()
+        
+        from app.main import get_metrics_summary
+        result = get_metrics_summary(db=db_session)
+        
+        assert result["total_failed"] == 2
+        assert result["total_recovered"] == 1
+        assert result["total_at_risk_amount"] == 99900 + 199900  # ₹2998 in paise
+        assert result["total_recovered_amount"] == 499900  # ₹4999 in paise
+        # Recovery rate = 1 / (2 + 1) = 33.33%
+        assert abs(result["recovery_rate_pct"] - 33.33) < 0.01
+
+    def test_simulate_payment_demo_not_found(self, db_session):
+        """Test /demo/simulate-payment returns 404 for non-existent action."""
+        from fastapi import HTTPException
+        from app.main import simulate_payment_demo
+        
+        with pytest.raises(HTTPException) as exc_info:
+            simulate_payment_demo(recovery_action_id=99999, db=db_session)
+        
+        assert exc_info.value.status_code == 404
+
+    def test_simulate_payment_demo_success(self, db_session):
+        """Test /demo/simulate-payment successfully marks action as recovered."""
+        from app.services import create_subscription, create_failure_event, create_recovery_action
+        from app.database import SubscriptionStatus, FailureCode, ActionType, RecoveryStatus
+        from app.main import simulate_payment_demo
+        
+        # Create subscription with failure and recovery action
+        sub = create_subscription(
+            db=db_session,
+            customer_name="Demo User",
+            customer_email="demo@example.com",
+            plan_name="Basic",
+            amount=99900
+        )
+        sub.status = SubscriptionStatus.failed
+        db_session.commit()
+        
+        failure = create_failure_event(
+            db=db_session,
+            subscription_id=sub.id,
+            failure_code=FailureCode.card_expired,
+            retry_count=0
+        )
+        
+        action = create_recovery_action(
+            db=db_session,
+            failure_event_id=failure.id,
+            action_type=ActionType.send_update_link,
+            reason_text="Card expired, sent payment link"
+        )
+        
+        # Verify initial state
+        assert action.status == RecoveryStatus.pending
+        assert sub.status == SubscriptionStatus.failed
+        
+        # Call demo simulation endpoint
+        result = simulate_payment_demo(recovery_action_id=action.id, db=db_session)
+        
+        assert result["status"] == "success"
+        assert "[DEMO]" in result["message"]
+        
+        # Verify state changes
+        db_session.refresh(action)
+        db_session.refresh(sub)
+        
+        assert action.status == RecoveryStatus.success
+        assert sub.status == SubscriptionStatus.recovered
+        
+        # Verify audit log was created
+        from app.database import AuditLog
+        audit_entries = db_session.query(AuditLog).filter(
+            AuditLog.entity_type == "subscription",
+            AuditLog.entity_id == sub.id
+        ).all()
+        
+        demo_audit = [e for e in audit_entries if "DEMO SIMULATION" in e.event_description]
+        assert len(demo_audit) >= 1
