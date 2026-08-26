@@ -395,6 +395,122 @@ def run_batch_recovery(
     }
 
 
+# Metrics Summary Endpoint
+@app.get("/metrics/summary")
+def get_metrics_summary(db: Session = Depends(get_db)):
+    """
+    Compute and return aggregated metrics for the dashboard.
+    
+    Returns:
+    - total_failed: count of subscriptions with status=failed
+    - total_recovered: count of subscriptions with status=recovered
+    - total_at_risk_amount: sum of amount for failed subscriptions (in paise)
+    - total_recovered_amount: sum of amount for recovered subscriptions (in paise)
+    - recovery_rate_pct: percentage of recovered vs (recovered + failed)
+    """
+    from app.database import Subscription, SubscriptionStatus
+    
+    # Count failed and recovered subscriptions
+    total_failed = db.query(Subscription).filter(
+        Subscription.status == SubscriptionStatus.failed
+    ).count()
+    
+    total_recovered = db.query(Subscription).filter(
+        Subscription.status == SubscriptionStatus.recovered
+    ).count()
+    
+    # Sum amounts for failed subscriptions (at risk)
+    failed_subs = db.query(Subscription).filter(
+        Subscription.status == SubscriptionStatus.failed
+    ).all()
+    total_at_risk_amount = sum(sub.amount for sub in failed_subs)
+    
+    # Sum amounts for recovered subscriptions
+    recovered_subs = db.query(Subscription).filter(
+        Subscription.status == SubscriptionStatus.recovered
+    ).all()
+    total_recovered_amount = sum(sub.amount for sub in recovered_subs)
+    
+    # Calculate recovery rate
+    total_processed = total_failed + total_recovered
+    recovery_rate_pct = 0.0
+    if total_processed > 0:
+        recovery_rate_pct = round((total_recovered / total_processed) * 100, 2)
+    
+    return {
+        "total_failed": total_failed,
+        "total_recovered": total_recovered,
+        "total_at_risk_amount": total_at_risk_amount,
+        "total_recovered_amount": total_recovered_amount,
+        "recovery_rate_pct": recovery_rate_pct
+    }
+
+
+# Demo Simulate Payment Endpoint (DEMO ONLY)
+@app.post("/demo/simulate-payment/{recovery_action_id}")
+def simulate_payment_demo(recovery_action_id: int, db: Session = Depends(get_db)):
+    """
+    DEMO ONLY - Simulates a successful payment webhook for demo purposes.
+    
+    This endpoint bypasses the real Razorpay webhook flow and directly marks
+    the RecoveryAction as success and the Subscription as recovered.
+    
+    Use this in demos to show "before/after" recovery numbers without waiting
+    for a real test payment link click.
+    
+    Creates an AuditLog entry noting this was a simulated/demo payment confirmation.
+    """
+    from app.database import RecoveryAction, Subscription, RecoveryStatus, SubscriptionStatus, FailureEvent
+    from app.services import create_audit_log
+    from app.database import EntityType
+    
+    # Find the recovery action
+    recovery_action = db.query(RecoveryAction).filter(
+        RecoveryAction.id == recovery_action_id
+    ).first()
+    
+    if not recovery_action:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RecoveryAction {recovery_action_id} not found"
+        )
+    
+    # Update RecoveryAction status to success
+    recovery_action.status = RecoveryStatus.success
+    recovery_action.resolved_at = services.datetime.utcnow()
+    
+    # Get the associated failure event and subscription
+    failure_event = db.query(FailureEvent).filter(
+        FailureEvent.id == recovery_action.failure_event_id
+    ).first()
+    
+    if failure_event:
+        subscription = db.query(Subscription).filter(
+            Subscription.id == failure_event.subscription_id
+        ).first()
+        
+        if subscription:
+            # Update subscription status to recovered
+            subscription.status = SubscriptionStatus.recovered
+            
+            # Create audit log entry noting this was a demo simulation
+            create_audit_log(
+                db=db,
+                entity_type=EntityType.subscription,
+                entity_id=subscription.id,
+                event_description=f"[DEMO SIMULATION] Payment confirmed via demo endpoint. Subscription recovered. Amount: ₹{subscription.amount/100:.2f}"
+            )
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": "[DEMO] Payment simulated successfully",
+        "recovery_action_id": recovery_action_id,
+        "note": "This was a demo simulation, not a real payment webhook"
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
