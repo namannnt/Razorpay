@@ -1,0 +1,7 @@
+# Dashboard dependencies for ChurnGuard Streamlit application
+# Install in a separate virtualenv from the backend
+# The dashboard communicates with the backend over HTTP and doesn't need FastAPI/SQLAlchemy
+
+streamlit>=1.31.0
+requests>=2.31.0
+pandas>=2.0.0
