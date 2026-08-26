@@ -3,6 +3,7 @@ Tests for Razorpay webhook and batch recovery endpoints.
 
 These tests use mocked Razorpay API calls to avoid requiring real network access.
 """
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,11 +12,13 @@ from datetime import datetime, timedelta
 import hmac
 import hashlib
 import json
-import os
 
 from app.main import app
 from app.database import Base, SessionLocal, engine, Subscription, FailureEvent, RecoveryAction, RecoveryStatus, SubscriptionStatus, FailureCode, ActionType
 from app.agents.provider import MockPaymentProvider
+
+# Ensure mock provider is used for all tests (test isolation)
+os.environ["USE_MOCK_PROVIDER"] = "true"
 
 # Setup test database
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_webhook_batch.db"

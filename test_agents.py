@@ -11,10 +11,14 @@ Tests cover:
 7. repeated execution is handled safely/idempotently
 8. existing 12 tests still pass
 """
+import os
 import pytest
 import subprocess
 import time
 import requests
+
+# Ensure mock provider is used for all tests (test isolation)
+os.environ["USE_MOCK_PROVIDER"] = "true"
 
 # Test configuration
 BASE_URL = "http://localhost:8000"
