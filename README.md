@@ -18,7 +18,7 @@ ChurnGuard implements a LangGraph-based agent workflow with 5 sequential nodes:
    - **Quiet Hours**: Block `send_update_link` during 9PM–8AM IST (customer communication pause)
    - **High-Value Approval**: Require human approval for amounts > ₹5000
    - **Repeated-Failure Escalation**: If subscription has 2+ prior failures, escalate to manual review
-5. **Execute Recovery Action** — Creates `RecoveryAction` record; if `send_update_link`, generates real Razorpay test-mode payment link via MockProvider; if stopped by policy, marks as `stopped_by_rule`
+5. **Execute Recovery Action** — Creates `RecoveryAction` record; if `send_update_link`, generates a payment link via the configured provider (RazorpayProvider for real test-mode API calls, or MockPaymentProvider for fast local testing/demo without hitting the network), controlled by the `USE_MOCK_PROVIDER` env var; if stopped by policy, marks as `stopped_by_rule`
 6. **Log Workflow Completion** — Writes audit trail entries for compliance tracking
 
 ```
@@ -168,6 +168,8 @@ Dashboard opens at `http://localhost:8501`.
 5. **Inspect Audit Trail**: Expand "📜 Live Audit Trail" to see timestamped entries for every workflow decision and action
 
 6. **Review Guardrails**: Check "🚫 Policy Guardrails" panel for actions stopped by max-retries, quiet-hours, or high-value rules
+
+**For the pitch video demo:** Before recording, set `USE_MOCK_PROVIDER=false` in your `.env` file so the payment links shown are real Razorpay test-mode links you can actually click and pay.
 
 ## Test Coverage Summary
 

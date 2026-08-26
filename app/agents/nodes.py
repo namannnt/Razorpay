@@ -4,6 +4,7 @@ LangGraph workflow nodes for ChurnGuard payment recovery.
 Each node is a pure function that takes the workflow state and returns updated state.
 Nodes are designed to be testable independently and can later be replaced with LLM-based versions.
 """
+import os
 from datetime import datetime
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
@@ -428,8 +429,9 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
         
         return state
     
-    # Initialize provider (mock by default)
-    provider = get_provider(use_mock=True)
+    # Initialize provider based on USE_MOCK_PROVIDER environment variable
+    use_mock = os.getenv("USE_MOCK_PROVIDER", "true").lower() == "true"
+    provider = get_provider(use_mock=use_mock)
     razorpay_link_id = None
     
     # Execute based on action type
