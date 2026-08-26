@@ -1,48 +1,52 @@
-```
-# Python virtual environments
-venv-backend-test/
-venv-dashboard-test/
-
-# Python compiled files
+```markdown
+# Compiled and build artifacts
 *.pyc
 __pycache__/
-*.pyo
-*.pyd
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
 # Dependencies
-pip/
-setuptools/
-wheel/
-*.dist-info/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+target/
+.gradle/
+.mypy_cache/
+.pytest_cache/
 
-# Logs
+# Logs and temp files
 *.log
-
-# Temporary files
 *.tmp
 *.swp
 *.swo
 
-# Environment variables
+# Environment
 .env
 .env.local
-*.env.*
+.env.*
 
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# IDE specific
+# Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# OS specific
+# System files
 .DS_Store
 Thumbs.db
 
-# Database
-churnguard.db
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Compressed files
 *.zip
@@ -67,5 +71,4 @@ churnguard.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-
 ```
