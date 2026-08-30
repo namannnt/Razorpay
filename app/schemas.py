@@ -67,6 +67,7 @@ class RecoveryActionBase(BaseModel):
     status: RecoveryStatusEnum = RecoveryStatusEnum.pending
     reason_text: Optional[str] = None
     razorpay_payment_link_id: Optional[str] = None
+    payment_link_url: Optional[str] = None  # Customer-facing URL; exposed so the dashboard Simulate Payment panel can filter on it
 
 
 class RecoveryActionCreate(RecoveryActionBase):

@@ -398,11 +398,12 @@ class RecoveryWorkflowState(TypedDict):
 - **Returns**:
   ```json
   {
-    "total_failed": 45,
-    "total_recovered": 12,
-    "total_at_risk_amount": 4500000,
-    "total_recovered_amount": 1200000,
-    "recovery_rate_pct": 21.05
+    "total_failed": 25,
+    "total_recovered": 0,
+    "total_at_risk_amount": 25897500,
+    "total_recovered_amount": 0,
+    "recovery_rate_pct": 0.0,
+    "escalated_to_human": 17
   }
   ```
 - **Dashboard**: "Key Metrics" section displays:
@@ -415,15 +416,16 @@ class RecoveryWorkflowState(TypedDict):
 **Batch Endpoint**: `POST /recovery/run-batch` returns:
 ```json
 {
-  "total_processed": 70,
+  "total_processed": 21,
   "actions_by_type": {
-    "send_update_link": 35,
-    "retry_after_24h": 20,
-    "escalate": 10
+    "retry_after_24h": 9,
+    "send_update_link": 9,
+    "escalate": 2,
+    "retry_now": 1
   },
-  "stopped_by_policy": 5,
+  "stopped_by_policy": 11,
   "errors": 0,
-  "payment_links_created": 35
+  "payment_links_created": 4
 }
 ```
 

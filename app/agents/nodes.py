@@ -482,7 +482,7 @@ def execute_recovery_action(state: RecoveryWorkflowState, db: Session) -> Recove
     
     # Store payment link ID if created
     state["razorpay_payment_link_id"] = razorpay_link_id
-    state["is_simulated"] = True  # Always simulated in current implementation
+    state["is_simulated"] = state.get("execution_result", {}).get("is_simulated", True)
     
     # Log audit entry for action execution
     audit_log = create_audit_log(

@@ -50,3 +50,5 @@ dist/
 build/
 *.egg-info/
 ```
+venv-backend/
+venv-dashboard/

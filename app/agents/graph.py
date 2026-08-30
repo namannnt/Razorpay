@@ -225,6 +225,10 @@ class RecoveryWorkflowRunner:
         
         state = analyze_failure(state, db)
         state = decide_recovery_action(state, db)
+        # Policy guard: applies max_retries, quiet_hours, high_value_approval,
+        # and repeated_failure_pattern rules before execution.
+        # Must be called here to match the compiled graph's node sequence.
+        state = check_policy_guards(state, db)
         state = execute_recovery_action(state, db)
         state = log_workflow_completion(state, db)
         

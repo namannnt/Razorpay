@@ -121,10 +121,20 @@ st.header("Control Panel")
 col1, col2, col3 = st.columns([1, 1, 2])
 
 with col1:
+    # Add number input for subscription count
+    subscription_count = st.number_input(
+        "Subscriptions to generate",
+        min_value=1,
+        max_value=200,
+        value=25,  # Default to 25 for demo safety
+        step=1,
+        help="For demo recording, use 25 to stay under Razorpay's 30 payment link test limit"
+    )
+    
     if st.button("📊 Generate Synthetic Data", use_container_width=True):
         try:
-            with st.spinner("Generating synthetic data..."):
-                response = requests.post(f"{BACKEND_URL}/generate-data", timeout=30)
+            with st.spinner(f"Generating {subscription_count} subscriptions..."):
+                response = requests.post(f"{BACKEND_URL}/generate-data?count={subscription_count}", timeout=30)
                 response.raise_for_status()
                 result = response.json()
                 data = result.get("data", {})
@@ -138,9 +148,9 @@ with col1:
 
 with col2:
     if st.button("▶️ Run Batch Recovery", use_container_width=True):
-        with st.spinner("Running batch recovery workflow..."):
+        with st.spinner("Running batch recovery workflow… (may take 2–4 min with real Razorpay calls)"):
             try:
-                response = requests.post(f"{BACKEND_URL}/recovery/run-batch", timeout=60)
+                response = requests.post(f"{BACKEND_URL}/recovery/run-batch", timeout=300)
                 response.raise_for_status()
                 result = response.json()
                 st.session_state.last_batch_run = result
@@ -199,14 +209,9 @@ if metrics:
         )
     
     with col5:
-        # Escalated = escalate actions + stopped_by_policy from last batch
-        escalated_count = 0
-        if st.session_state.last_batch_run:
-            actions_by_type = st.session_state.last_batch_run.get("actions_by_type", {})
-            escalated_count = actions_by_type.get("escalate", 0) + st.session_state.last_batch_run.get("stopped_by_policy", 0)
         st.metric(
             label="Escalated to Human",
-            value=escalated_count
+            value=metrics.get("escalated_to_human", 0)
         )
 else:
     st.warning("Could not load metrics. Ensure the FastAPI backend is running.")
@@ -257,7 +262,7 @@ if recovery_actions:
     
     # Make payment links clickable
     def make_clickable(url):
-        if url and url.startswith("http"):
+        if isinstance(url, str) and url.startswith("http"):
             return f'<a href="{url}" target="_blank">Click to Pay</a>'
         return ""
     
@@ -274,7 +279,7 @@ if recovery_actions:
         return ""
     
     # Style the dataframe
-    styled_df = display_df.style.applymap(
+    styled_df = display_df.style.map(
         color_status, 
         subset=["Status"]
     ).format(

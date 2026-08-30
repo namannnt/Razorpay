@@ -154,20 +154,37 @@ Dashboard opens at `http://localhost:8501`.
 
 ## How to Run a Demo End-to-End
 
-1. **Generate Data**: Click "📊 Generate Synthetic Data" in dashboard control panel (creates 70 subscriptions with ~70 failure events)
+1. **Generate Data**: Click "📊 Generate Synthetic Data" in dashboard control panel (set to 25 subscriptions to stay under Razorpay test-mode 30 payment link limit)
 
-2. **Run Batch Recovery**: Click "▶️ Run Batch Recovery" — watch as each failure is processed through the 5-node workflow
+2. **Run Batch Recovery**: Click "▶️ Run Batch Recovery" — watch as each failure is processed through the 5-node workflow. Expect processing of ~21 actions with 0 errors and 4 real payment links created.
 
 3. **View Results**:
-   - **Key Metrics**: See recovery rate, ₹ at risk, ₹ recovered, escalated count
+   - **Key Metrics**: Starting point shows 0% recovery rate, ₹2,58,975 at risk, 17 escalated to human
    - **Failure Breakdown**: Bar chart showing distribution of failure codes
    - **Recovery Action Outcomes**: Table with customer, failure reason, action taken, status, payment links
+   - **Policy Guardrails**: 11 actions stopped by policy rules (high-value approval, max retries, etc.)
 
 4. **Simulate Payment**: In "Demo Payment Simulation" section, click "Simulate Payment ✅" for any pending action — metrics update live showing increased recovery rate and ₹ recovered
 
 5. **Inspect Audit Trail**: Expand "📜 Live Audit Trail" to see timestamped entries for every workflow decision and action
 
 6. **Review Guardrails**: Check "🚫 Policy Guardrails" panel for actions stopped by max-retries, quiet-hours, or high-value rules
+
+**Example Results from Clean Run:**
+```json
+{
+  "total_processed": 21,
+  "actions_by_type": {
+    "retry_after_24h": 9,
+    "send_update_link": 9,
+    "escalate": 2,
+    "retry_now": 1
+  },
+  "stopped_by_policy": 11,
+  "errors": 0,
+  "payment_links_created": 4
+}
+```
 
 **For the pitch video demo:** Before recording, set `USE_MOCK_PROVIDER=false` in your `.env` file so the payment links shown are real Razorpay test-mode links you can actually click and pay.
 

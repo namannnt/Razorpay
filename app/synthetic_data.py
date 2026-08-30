@@ -5,6 +5,7 @@ Generates realistic Indian subscription data with payment failures.
 from faker import Faker
 from datetime import datetime, timedelta
 import random
+import re
 
 from app.database import (
     SessionLocal, Base, engine,
@@ -28,12 +29,13 @@ PLANS = [
     {"name": "Enterprise Annual", "amount_paise": 2999900},
 ]
 
-# Failure code weights - card_expired and insufficient_funds are most common
+# Failure code weights - card_expired and authentication_failed trigger send_update_link
+# For demo safety, keep these lower to avoid hitting 30 payment link cap
 FAILURE_CODE_WEIGHTS = {
-    FailureCode.card_expired: 35,
-    FailureCode.insufficient_funds: 35,
-    FailureCode.authentication_failed: 20,
-    FailureCode.bank_downtime: 10,
+    FailureCode.card_expired: 30,  # Triggers send_update_link
+    FailureCode.insufficient_funds: 40,  # Often triggers retry_now, not payment links
+    FailureCode.authentication_failed: 20,  # Triggers send_update_link
+    FailureCode.bank_downtime: 10,  # Usually triggers retry_after_24h, not payment links
 }
 
 
@@ -46,11 +48,13 @@ def generate_subscription(status: SubscriptionStatus = SubscriptionStatus.failed
     last_name = fake.last_name()
     customer_name = f"{first_name} {last_name}"
     
-    # Create email from name or use fake email
+    # Create an RFC-friendly email local part. Some Faker name values include
+    # whitespace, which would fail the API response schema's EmailStr validation.
     if random.random() > 0.3:
-        customer_email = f"{first_name.lower()}.{last_name.lower()}@{random.choice(['gmail.com', 'yahoo.co.in', 'outlook.com', 'rediffmail.com'])}"
+        local_part = re.sub(r"[^a-z0-9]+", "", f"{first_name}{last_name}".lower())
+        customer_email = f"{local_part}@{random.choice(['gmail.com', 'yahoo.co.in', 'outlook.com', 'rediffmail.com'])}"
     else:
-        customer_email = fake.email()
+        customer_email = fake.ascii_free_email()
     
     # Random creation date within last 6 months
     days_ago = random.randint(1, 180)
@@ -145,7 +149,13 @@ def clear_database():
 
 
 def generate_synthetic_data(num_subscriptions: int = 70):
-    """Generate synthetic data for testing."""
+    """
+    Generate synthetic data for testing.
+    
+    Args:
+        num_subscriptions: Number of subscriptions to create (default 70)
+                          For demo with Razorpay test mode, use 25 to stay under 30 payment link limit
+    """
     # Clear and recreate tables
     clear_database()
     
@@ -212,10 +222,10 @@ def generate_synthetic_data(num_subscriptions: int = 70):
         
         db.commit()
         
-        print(f"✓ Created {len(subscriptions)} subscriptions")
-        print(f"✓ Created {len(failure_events)} failure events")
-        print(f"✓ Created {len(recovery_actions)} recovery actions")
-        print(f"✓ Created {len(audit_logs)} audit log entries")
+        print(f"[OK] Created {len(subscriptions)} subscriptions")
+        print(f"[OK] Created {len(failure_events)} failure events")
+        print(f"[OK] Created {len(recovery_actions)} recovery actions")
+        print(f"[OK] Created {len(audit_logs)} audit log entries")
         
         # Print summary statistics
         print("\n--- Summary Statistics ---")

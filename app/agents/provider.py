@@ -10,7 +10,12 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from datetime import datetime
 import os
+import time
 import logging
+from dotenv import load_dotenv
+
+# Safe to call more than once; this also supports direct imports of this module.
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -209,55 +214,97 @@ class RazorpayProvider(PaymentRecoveryProvider):
     ) -> Dict[str, Any]:
         """
         Create a real Razorpay payment link.
-        
+
         Uses Razorpay's Payment Links API to generate a shareable link
         that customers can use to complete their payment.
+
+        Includes:
+        - A unique reference_id with epoch-ms suffix to avoid duplicate collisions
+          across DB resets / re-runs.
+        - A 400 ms inter-request pause to stay under Razorpay's rate limit.
+        - Retry-with-exponential-backoff (up to 3 attempts) for transient
+          rate-limit (429 / "Too many requests") errors.
         """
-        try:
-            client = self._get_client()
-            
-            # Build payment link payload per Razorpay API spec
-            payload = {
-                "amount": amount,  # Already in paise
-                "currency": currency,
-                "description": description or f"Payment recovery for {plan_name} - {customer_name}",
-                "customer": {
-                    "name": customer_name,
-                    "email": customer_email
-                },
-                "notify": {
-                    "sms": False,
-                    "email": True
-                },
-                "reminder_enable": True,
-                "reference_id": f"churnguard_{failure_event_id}_{subscription_id}",
-                "callback_url": None,  # Optional callback after payment
-                "callback_method": "get"  # Default method
-            }
-            
-            # Create payment link via Razorpay API
-            link = client.payment_link.create(payload)
-            
-            logger.info(f"Created Razorpay payment link: {link['id']} for subscription {subscription_id}")
-            
-            return {
-                "payment_link_id": link["id"],
-                "short_url": link["short_url"],
-                "status": link["status"],
-                "amount": link["amount"],
-                "currency": link["currency"],
-                "customer_email": customer_email,
-                "customer_name": customer_name,
-                "description": payload["description"],
-                "reference_id": payload["reference_id"],
-                "is_simulated": False,
-                "created_at": datetime.fromtimestamp(link.get("created_at", 0)).isoformat() if link.get("created_at") else datetime.utcnow().isoformat(),
-                "provider": "razorpay"
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to create Razorpay payment link: {str(e)}")
-            raise
+        client = self._get_client()
+
+        # Epoch-ms suffix guarantees uniqueness across runs even when DB IDs recycle.
+        epoch_ms = int(time.time() * 1000)
+        reference_id = f"churnguard_{failure_event_id}_{subscription_id}_{epoch_ms}"
+
+        # Build payment link payload per Razorpay API spec
+        payload = {
+            "amount": amount,  # Already in paise
+            "currency": currency,
+            "description": description or f"Payment recovery for {plan_name} - {customer_name}",
+            "customer": {
+                "name": customer_name,
+                "email": customer_email
+            },
+            "notify": {
+                "sms": False,
+                "email": True
+            },
+            "reminder_enable": True,
+            "reference_id": reference_id,
+            "callback_url": None,  # Optional callback after payment
+            "callback_method": "get"  # Default method
+        }
+
+        # 4 s pause before every real API call to stay well under Razorpay
+        # test-mode rate limits in the sequential-batch scenario.
+        # At ~4 s/call we stay under the observed burst limit of ~5 calls/burst
+        # that caused the original 28/56 error rate at 1 s/call.
+        time.sleep(4.0)
+
+        # Retry-with-exponential-backoff for transient rate-limit errors only.
+        # 5 attempts with 2 s → 4 s → 8 s → 16 s backoff.
+        MAX_ATTEMPTS = 5
+        backoff_seconds = 2.0
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                link = client.payment_link.create(payload)
+                logger.info(
+                    f"Created Razorpay payment link: {link['id']} "
+                    f"for subscription {subscription_id} (attempt {attempt})"
+                )
+                return {
+                    "payment_link_id": link["id"],
+                    "short_url": link["short_url"],
+                    "status": link["status"],
+                    "amount": link["amount"],
+                    "currency": link["currency"],
+                    "customer_email": customer_email,
+                    "customer_name": customer_name,
+                    "description": payload["description"],
+                    "reference_id": reference_id,
+                    "is_simulated": False,
+                    "created_at": (
+                        datetime.fromtimestamp(link.get("created_at", 0)).isoformat()
+                        if link.get("created_at")
+                        else datetime.utcnow().isoformat()
+                    ),
+                    "provider": "razorpay"
+                }
+
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "too many requests" in err_str or "429" in err_str
+
+                if is_rate_limit and attempt < MAX_ATTEMPTS:
+                    logger.warning(
+                        f"Razorpay rate-limit hit for subscription {subscription_id} "
+                        f"(attempt {attempt}/{MAX_ATTEMPTS}). "
+                        f"Retrying in {backoff_seconds:.1f}s..."
+                    )
+                    time.sleep(backoff_seconds)
+                    backoff_seconds *= 2  # Exponential backoff
+                else:
+                    logger.error(
+                        f"Failed to create Razorpay payment link for subscription "
+                        f"{subscription_id} (attempt {attempt}): {e}"
+                    )
+                    raise
     
     def retry_payment(
         self,

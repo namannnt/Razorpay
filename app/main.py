@@ -4,12 +4,20 @@ ChurnGuard - AI Agent for Subscription Payment Recovery
 FastAPI backend entrypoint with basic CRUD endpoints and LangGraph recovery workflow.
 Business logic is kept in service layer for LangGraph agent integration.
 """
+from dotenv import load_dotenv
+
+# Load local configuration before importing application modules that read env vars.
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import hmac
 import hashlib
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db, Base, engine
 from app.schemas import (
@@ -57,14 +65,14 @@ def list_failures(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
 
 # Data Generation Endpoint
 @app.post("/generate-data")
-def generate_synthetic_data(db: Session = Depends(get_db)):
-    """Generate synthetic test data (70 subscriptions with failures)."""
+def generate_synthetic_data_endpoint(count: int = Query(70, ge=1, le=200, description="Number of subscriptions to generate (1-200)"), db: Session = Depends(get_db)):
+    """Generate synthetic test data with configurable subscription count (default 70, recommended 25 for demo)."""
     try:
         # Import here to avoid circular imports
         from app.synthetic_data import generate_synthetic_data as gen_data
-        result = gen_data(70)
+        result = gen_data(count)
         return {
-            "message": "Synthetic data generated successfully",
+            "message": f"Synthetic data generated successfully ({count} subscriptions)",
             "data": result
         }
     except Exception as e:
@@ -95,7 +103,7 @@ def run_recovery_workflow(failure_event_id: int, db: Session = Depends(get_db)):
     5. Writes AuditLog entries
     6. Returns structured results
     
-    IMPORTANT: All operations are simulated (mock provider). No real payments are processed.
+    The configured payment provider determines whether an action is simulated.
     """
     from app.agents import run_recovery_workflow as run_workflow
     from app.services import get_failure_event_by_id
@@ -130,7 +138,10 @@ def run_recovery_workflow(failure_event_id: int, db: Session = Depends(get_db)):
         return {
             "success": True,
             "workflow_result": result,
-            "message": f"Recovery action '{result.get('action_taken')}' initiated (simulated)"
+            "message": (
+                f"Recovery action '{result.get('action_taken')}' initiated "
+                f"({'simulated' if result.get('is_simulated', True) else 'real provider'})"
+            )
         }
         
     except Exception as e:
@@ -383,7 +394,11 @@ def run_batch_recovery(
                 
         except Exception as e:
             errors += 1
-            # Continue processing other events - don't let one failure stop the batch
+            # Log the actual error so it appears in uvicorn stderr — critical for diagnosis
+            logger.error(
+                f"[batch] failure_event_id={failure_event.id} FAILED: {type(e).__name__}: {e}",
+                exc_info=True
+            )
             continue
     
     return {
@@ -407,8 +422,9 @@ def get_metrics_summary(db: Session = Depends(get_db)):
     - total_at_risk_amount: sum of amount for failed subscriptions (in paise)
     - total_recovered_amount: sum of amount for recovered subscriptions (in paise)
     - recovery_rate_pct: percentage of recovered vs (recovered + failed)
+    - escalated_to_human: count of actions requiring human intervention
     """
-    from app.database import Subscription, SubscriptionStatus
+    from app.database import Subscription, SubscriptionStatus, RecoveryAction, ActionType, RecoveryStatus
     
     # Count failed and recovered subscriptions
     total_failed = db.query(Subscription).filter(
@@ -431,6 +447,20 @@ def get_metrics_summary(db: Session = Depends(get_db)):
     ).all()
     total_recovered_amount = sum(sub.amount for sub in recovered_subs)
     
+    # Calculate escalated to human count
+    # Count both: (a) actions with action_type='escalate' regardless of status
+    escalated_actions = db.query(RecoveryAction).filter(
+        RecoveryAction.action_type == ActionType.escalate
+    ).count()
+    
+    # And (b) actions stopped_by_rule due to high_value_approval policy
+    high_value_stopped = db.query(RecoveryAction).filter(
+        RecoveryAction.status == RecoveryStatus.stopped_by_rule,
+        RecoveryAction.reason_text.like("%requires human approval%")
+    ).count()
+    
+    escalated_to_human = escalated_actions + high_value_stopped
+    
     # Calculate recovery rate
     total_processed = total_failed + total_recovered
     recovery_rate_pct = 0.0
@@ -442,7 +472,8 @@ def get_metrics_summary(db: Session = Depends(get_db)):
         "total_recovered": total_recovered,
         "total_at_risk_amount": total_at_risk_amount,
         "total_recovered_amount": total_recovered_amount,
-        "recovery_rate_pct": recovery_rate_pct
+        "recovery_rate_pct": recovery_rate_pct,
+        "escalated_to_human": escalated_to_human
     }
 
 
