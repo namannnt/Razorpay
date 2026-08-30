@@ -477,6 +477,67 @@ def get_metrics_summary(db: Session = Depends(get_db)):
     }
 
 
+# Strategy Breakdown Endpoint
+@app.get("/metrics/strategy-breakdown")
+def get_strategy_breakdown(db: Session = Depends(get_db)):
+    """
+    Return per-action-type recovery statistics for the strategy breakdown table.
+
+    For each action_type found in recovery_actions:
+      - count:              total RecoveryAction rows with that action_type
+      - total_amount:       sum of subscription.amount (paise) for those rows
+      - recovered_count:    count where status = 'success'
+      - recovered_amount:   sum of subscription.amount where status = 'success'
+      - recovery_rate_pct:  recovered_count / count * 100 (0 if count == 0)
+
+    Pure read-only aggregation — no writes, no side effects.
+    """
+    from app.database import (
+        RecoveryAction, FailureEvent, Subscription,
+        ActionType, RecoveryStatus,
+    )
+
+    # Fetch all recovery actions with their related subscription amounts via joins.
+    # Using explicit join to avoid N+1: one query returns (action, subscription.amount).
+    rows = (
+        db.query(RecoveryAction, Subscription.amount)
+        .join(FailureEvent, RecoveryAction.failure_event_id == FailureEvent.id)
+        .join(Subscription, FailureEvent.subscription_id == Subscription.id)
+        .all()
+    )
+
+    # Accumulate per-action_type buckets.
+    buckets: dict = {}
+    for action, amount in rows:
+        key = action.action_type.value  # string e.g. "send_update_link"
+        if key not in buckets:
+            buckets[key] = {
+                "action_type": key,
+                "count": 0,
+                "total_amount": 0,
+                "recovered_count": 0,
+                "recovered_amount": 0,
+            }
+        b = buckets[key]
+        b["count"] += 1
+        b["total_amount"] += amount
+        if action.status == RecoveryStatus.success:
+            b["recovered_count"] += 1
+            b["recovered_amount"] += amount
+
+    # Compute recovery_rate_pct and return as a stable list ordered by action_type name.
+    result = []
+    for key in sorted(buckets):
+        b = buckets[key]
+        b["recovery_rate_pct"] = (
+            round(b["recovered_count"] / b["count"] * 100, 1)
+            if b["count"] > 0 else 0.0
+        )
+        result.append(b)
+
+    return {"strategies": result}
+
+
 # Demo Simulate Payment Endpoint (DEMO ONLY)
 @app.post("/demo/simulate-payment/{recovery_action_id}")
 def simulate_payment_demo(recovery_action_id: int, db: Session = Depends(get_db)):

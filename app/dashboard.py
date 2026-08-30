@@ -234,6 +234,44 @@ if failures:
 else:
     st.info("No failure data available.")
 
+# Recovery Strategy Breakdown Panel
+def get_strategy_breakdown():
+    """Fetch per-action-type recovery statistics from the backend."""
+    try:
+        response = requests.get(f"{BACKEND_URL}/metrics/strategy-breakdown", timeout=10)
+        response.raise_for_status()
+        return response.json().get("strategies", [])
+    except requests.RequestException as e:
+        st.error(f"Failed to fetch strategy breakdown: {e}")
+        return []
+
+st.header("Recovery Strategy Breakdown")
+strategy_data = get_strategy_breakdown()
+if strategy_data:
+    rows = []
+    for s in strategy_data:
+        label = s["action_type"].replace("_", " ").title()
+        total_inr = format_inr(s["total_amount"])
+        recovered_inr = format_inr(s["recovered_amount"])
+        rows.append({
+            "Strategy": label,
+            "Cases": s["count"],
+            "Amount Attempted": total_inr,
+            "Recovered": s["recovered_count"],
+            "Amount Recovered": recovered_inr,
+            "Recovery Rate": f"{s['recovery_rate_pct']:.1f}%",
+        })
+    st.dataframe(
+        pd.DataFrame(rows).set_index("Strategy"),
+        use_container_width=True,
+    )
+    st.caption(
+        "Counts include both pre-existing synthetic actions and actions created by the latest batch run. "
+        "Recovery Rate = successful actions ÷ total actions per strategy."
+    )
+else:
+    st.info("No strategy data available. Generate data and run batch recovery first.")
+
 # Recovery Action Outcomes Table
 st.header("Recovery Action Outcomes")
 if recovery_actions:
