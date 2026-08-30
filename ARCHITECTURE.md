@@ -209,7 +209,7 @@ Applies deterministic rules based on failure code:
 **Outputs**:
 - `recommended_action_type`: One of `retry_now`, `send_update_link`, `retry_after_24h`, `escalate`
 - `action_reason`: Explanation text
-- `confidence_score`: 0.0–1.0 confidence in decision
+- `policy_coverage_score`: 0.0–1.0 rule-match certainty in decision
 - `_requires_payment_link`: True if action is `send_update_link`
 
 ---
@@ -362,7 +362,7 @@ class RecoveryWorkflowState(TypedDict):
     # Decision results (populated by Node 3)
     recommended_action_type: Optional[str]
     action_reason: Optional[str]
-    confidence_score: Optional[float]
+    policy_coverage_score: Optional[float]
     
     # Policy check results (populated by Node 4)
     policy_approved: Optional[bool]
@@ -509,7 +509,7 @@ run_recovery_workflow(failure_event_id, db)
     │
     ├─> analyze_failure ──> State: {failure_category, analysis, implications}
     │
-    ├─> decide_recovery_action ──> State: {action_type, reason, confidence}
+    ├─> decide_recovery_action ──> State: {action_type, reason, policy_coverage}
     │
     ├─> check_policy_guards ──> State: {policy_approved, rule_triggered}
     │       │

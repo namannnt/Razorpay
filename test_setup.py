@@ -124,7 +124,8 @@ class TestAPIEndpoints:
         response = requests.post(f"{BASE_URL}/generate-data", timeout=TEST_TIMEOUT)
         assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Synthetic data generated successfully"
+        # Message now includes count: "Synthetic data generated successfully (N subscriptions)"
+        assert data["message"].startswith("Synthetic data generated successfully")
         assert data["data"]["subscriptions"] == 70
     
     def test_list_subscriptions_endpoint(self, server):

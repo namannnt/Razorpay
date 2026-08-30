@@ -286,31 +286,33 @@ class TestBatchEndpoint:
         assert result["total_processed"] == 2
     
     def test_batch_endpoint_continues_on_individual_failure(self, client, db, monkeypatch):
-        """Test that batch continues processing even if one record's API call fails."""
+        """Test that batch continues processing even if one record's workflow raises an exception."""
         # Create multiple failures
         for i in range(3):
             sub = create_test_subscription(db, f"Continue On Error Customer {i}")
-            create_test_failure_event(db, sub.id)
-        
-        # Mock provider to fail on second call
-        original_create_link = MockPaymentProvider.create_payment_link
+            create_test_failure_event(db, sub.id, FailureCode.card_expired)
+
+        # Patch run_recovery_workflow at the point where the batch endpoint imports it
+        # (app.agents module), so the patch applies when main.py calls it.
+        import app.agents as agents_module
+        original_run = agents_module.run_recovery_workflow
         call_count = [0]
-        
-        def flaky_create_link(self, *args, **kwargs):
+
+        def flaky_run_workflow(failure_event_id, db):
             call_count[0] += 1
             if call_count[0] == 2:
-                raise Exception("Simulated API failure")
-            return original_create_link(self, *args, **kwargs)
-        
-        monkeypatch.setattr(MockPaymentProvider, 'create_payment_link', flaky_create_link)
-        
+                raise Exception("Simulated workflow failure")
+            return original_run(failure_event_id, db=db)
+
+        monkeypatch.setattr(agents_module, 'run_recovery_workflow', flaky_run_workflow)
+
         # Run batch - should continue despite one failure
         response = client.post("/recovery/run-batch")
-        
+
         assert response.status_code == 200
         result = response.json()
-        
-        # Should have processed all 3, with at least 1 error
+
+        # All 3 processed, second one caused an error, batch continued
         assert result["total_processed"] == 3
         assert result["errors"] >= 1
     

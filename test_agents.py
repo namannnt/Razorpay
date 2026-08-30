@@ -68,7 +68,7 @@ class TestAgentModules:
             recovery_implications=None,
             recommended_action_type=None,
             action_reason=None,
-            confidence_score=None,
+            policy_coverage_score=None,
             razorpay_payment_link_id=None,
             action_status=None,
             execution_result=None,
@@ -216,7 +216,7 @@ class TestRecoveryDecider:
         result = decide_recovery_action(state)
         
         assert result["recommended_action_type"] == ActionType.send_update_link.value
-        assert result["confidence_score"] >= 0.9
+        assert result["policy_coverage_score"] >= 0.9
         assert result["_requires_payment_link"] is True
     
     def test_insufficient_funds_first_retry(self):
@@ -289,7 +289,7 @@ class TestRecoveryDecider:
         result = decide_recovery_action(state)
         
         assert result["recommended_action_type"] == ActionType.escalate.value
-        assert result["confidence_score"] >= 0.8
+        assert result["policy_coverage_score"] >= 0.8
     
     def test_high_value_transaction_caution(self):
         """High value transactions should use more cautious approach."""

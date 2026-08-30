@@ -41,7 +41,7 @@ class RecoveryWorkflowState(TypedDict):
     # Decision results
     recommended_action_type: Optional[str]  # 'retry_now', 'send_update_link', 'retry_after_24h', 'escalate'
     action_reason: Optional[str]
-    confidence_score: Optional[float]  # 0.0 to 1.0
+    policy_coverage_score: Optional[float]  # 0.0 to 1.0
     
     # Policy check results (new fields)
     policy_approved: Optional[bool]
@@ -77,6 +77,6 @@ class RecoveryDecisionResult(TypedDict):
     """Structured result from the Recovery Decision node."""
     action_type: str
     reason_text: str
-    confidence: float
+    policy_coverage: float
     requires_payment_link: bool
     max_retries_recommended: int

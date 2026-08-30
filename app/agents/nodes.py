@@ -184,14 +184,14 @@ def decide_recovery_action(state: RecoveryWorkflowState, db: Session = None) -> 
     # Decision matrix
     action_type = ActionType.escalate  # Default fallback
     reason_text = ""
-    confidence = 0.5
+    policy_coverage = 0.5
     requires_payment_link = False
     
     if failure_category == "card_expired":
         # Card expired: always use payment link, never retry
         action_type = ActionType.send_update_link
         reason_text = "Card expired - customer must update payment method via payment link"
-        confidence = 0.95
+        policy_coverage = 0.95
         requires_payment_link = True
         
     elif failure_category == "insufficient_funds":
@@ -200,39 +200,39 @@ def decide_recovery_action(state: RecoveryWorkflowState, db: Session = None) -> 
             if retry_count == 0:
                 action_type = ActionType.retry_now
                 reason_text = f"First failure due to insufficient funds - immediate retry may succeed"
-                confidence = 0.6
+                policy_coverage = 0.6
             else:
                 action_type = ActionType.retry_after_24h
                 reason_text = f"Retry #{retry_count} for insufficient funds - scheduling delayed retry"
-                confidence = 0.5
+                policy_coverage = 0.5
         else:
             action_type = ActionType.escalate
             reason_text = f"Max retries ({MAX_RETRIES}) exceeded for insufficient funds - manual review needed"
-            confidence = 0.8
+            policy_coverage = 0.8
             
     elif failure_category == "bank_downtime":
         # Bank downtime: retry after delay
         if retry_count < MAX_RETRIES:
             action_type = ActionType.retry_after_24h
             reason_text = "Bank downtime detected - scheduled retry after 24 hours"
-            confidence = 0.7
+            policy_coverage = 0.7
         else:
             action_type = ActionType.escalate
             reason_text = f"Persistent bank downtime after {retry_count} retries - manual investigation"
-            confidence = 0.75
+            policy_coverage = 0.75
             
     elif failure_category == "authentication_failed":
         # Auth failed: payment link for fresh auth
         action_type = ActionType.send_update_link
         reason_text = "Authentication failed - customer needs to re-authenticate via secure payment link"
-        confidence = 0.85
+        policy_coverage = 0.85
         requires_payment_link = True
         
     elif failure_category == "unknown":
         # Unknown: escalate
         action_type = ActionType.escalate
         reason_text = f"Unknown failure code '{state.get('failure_code')}' - requires manual investigation"
-        confidence = 0.9
+        policy_coverage = 0.9
     
     # High-value transactions may warrant extra caution
     if amount and amount >= 100000:  # ₹1000+
@@ -240,12 +240,12 @@ def decide_recovery_action(state: RecoveryWorkflowState, db: Session = None) -> 
             # For high amounts, prefer delayed retry over immediate
             action_type = ActionType.retry_after_24h
             reason_text += " (adjusted for high-value transaction)"
-            confidence = min(confidence + 0.1, 1.0)
+            policy_coverage = min(policy_coverage + 0.1, 1.0)
     
     # Update state with decision
     state["recommended_action_type"] = action_type.value
     state["action_reason"] = reason_text
-    state["confidence_score"] = confidence
+    state["policy_coverage_score"] = policy_coverage
     state["_requires_payment_link"] = requires_payment_link
     
     return state

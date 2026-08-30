@@ -24,7 +24,7 @@ ChurnGuard implements a LangGraph-based agent workflow with 5 sequential nodes:
 ```
 ┌─────────────────┐
 │ Synthetic Data  │
-│ (70 subs + fail)│
+│ (25 subs + fail)│
 └────────┬────────┘
          │
          v
@@ -213,18 +213,20 @@ Dashboard opens at `http://localhost:8501`.
 
 3. **Sequential Batch Processing**: The `/recovery/run-batch` endpoint processes failures one-at-a-time in a loop. Large batches (1000+) will be slow. No async/parallel execution is implemented.
 
-4. **Mock Payment Provider**: By default, `get_provider(use_mock=True)` returns a `MockProvider` that simulates Razorpay payment link creation with fake URLs. Real Razorpay integration requires setting `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `.env` and switching to `use_mock=False` in `execute_recovery_action` node.
+4. **Retry Action Implementation**: The `retry_now` and `retry_after_24h` action types create `RecoveryAction` records for workflow tracking but do not invoke Razorpay's payment retry mechanisms. Razorpay automatically handles subscription payment retries (T+1, T+2, T+3 days) when charges fail, but this is built into their subscription system rather than exposed as a manual API. ChurnGuard's retry actions serve as business logic placeholders. For actual payment recovery, use `send_update_link` actions to create fresh payment links where customers can update payment details manually.
 
-5. **Demo-Only Payment Simulation**: The `/demo/simulate-payment/{id}` endpoint bypasses webhook verification and directly marks actions as successful. This is clearly marked as DEMO ONLY and should never be used in production. Real payment confirmation must flow through `/webhooks/razorpay`.
+5. **Mock Payment Provider**: By default, `get_provider(use_mock=True)` returns a `MockProvider` that simulates Razorpay payment link creation with fake URLs. Real Razorpay integration requires setting `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `.env` and switching to `use_mock=False` in `execute_recovery_action` node.
 
-6. **Rule-Based Failure Classification**: The `analyze_failure` node uses deterministic if-else rules based on failure codes. No LLM-based classification is implemented (see Future Roadmap).
+6. **Demo-Only Payment Simulation**: The `/demo/simulate-payment/{id}` endpoint bypasses webhook verification and directly marks actions as successful. This is clearly marked as DEMO ONLY and should never be used in production. Real payment confirmation must flow through `/webhooks/razorpay`.
 
-7. **Approximate IST Calculation**: Quiet hours rule uses `(utc_hour + 5) % 24` for IST approximation, ignoring the 30-minute offset. This is sufficient for demo purposes but may misclassify edge cases around 8:30 AM / 9:30 PM boundaries.
+7. **Rule-Based Failure Classification**: The `analyze_failure` node uses deterministic if-else rules based on failure codes. No LLM-based classification is implemented (see Future Roadmap).
+
+8. **Approximate IST Calculation**: Quiet hours rule uses `(utc_hour + 5) % 24` for IST approximation, ignoring the 30-minute offset. This is sufficient for demo purposes but may misclassify edge cases around 8:30 AM / 9:30 PM boundaries.
 
 ## Future Roadmap
 
 - **Checkout-Recovery Workflow**: Extend agent to handle abandoned checkout sessions (pre-subscription) with cart-recovery payment links, separate from post-failure renewal recovery.
 
-- **LLM-Based Failure Classification**: Replace rule-based `analyze_failure` node with an LLM call that analyzes failure context, customer history, and payment metadata to classify failures and recommend actions with confidence scores.
+- **LLM-Based Failure Classification**: Replace rule-based `analyze_failure` node with an LLM call that analyzes failure context, customer history, and payment metadata to classify failures and recommend actions with policy coverage scores.
 
 - **PostgreSQL + Async Batch Processing**: Migrate to PostgreSQL with Alembic migrations; implement async batch processing using `asyncio.gather()` or Celery for parallel recovery execution on large datasets.

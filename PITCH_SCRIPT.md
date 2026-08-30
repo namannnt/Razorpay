@@ -22,7 +22,7 @@
 
 **[Point to metrics cards now populated]**
 
-"We just generated 70 failed subscriptions representing over ₹2 lakh in at-risk revenue. Let me show you how ChurnGuard recovers it."
+"We just generated 25 failed subscriptions representing over ₹2,58,975 in at-risk revenue. Let me show you how ChurnGuard recovers it."
 
 ---
 
@@ -30,7 +30,7 @@
 
 **[Screen: Dashboard with data loaded, cursor hovering over "Run Batch Recovery"]**
 
-"I'll now run batch recovery on all 70 failures. Watch as each one flows through our 5-node LangGraph workflow: load data, analyze failure, decide action, check policy guards, and execute recovery."
+"I'll now run batch recovery on all 25 failures. Watch as each one flows through our 5-node LangGraph workflow: load data, analyze failure, decide action, check policy guards, and execute recovery."
 
 **[Click "Run Batch Recovery" button]**
 
@@ -38,11 +38,12 @@
 
 **[Point to batch results panel]**
 
-"- 70 total processed
-- 35 payment links created for card-expired and auth-failed customers
-- 20 delayed retries scheduled for insufficient funds
-- 10 escalated to manual review
-- 5 stopped by policy guardrails"
+"- 21 total processed
+- 9 payment links created for card-expired and auth-failed customers  
+- 9 delayed retries scheduled for insufficient funds
+- 2 escalated to manual review
+- 1 immediate retry attempted
+- 11 stopped by policy guardrails"
 
 **[Scroll down to Failure Breakdown chart]**
 
@@ -70,7 +71,7 @@
 
 "**Step 2 — Analyze Failure**: Our rule-based analyzer classifies this as `card_expired`. Key insight: automatic retry will definitely fail — the card is physically expired. Customer action is required."
 
-"**Step 3 — Decide Action**: Based on the analysis, we select `send_update_link` — send a Razorpay payment link where Priya can update her card details. Confidence score: 95%."
+"**Step 3 — Decide Action**: Based on the analysis, we select `send_update_link` — send a Razorpay payment link where Priya can update her card details. Rule-match certainty: 95%."
 
 "**Step 4 — Check Policy Guards**: We verify no stopping rules apply. It's 2 PM IST — not quiet hours. Amount is under ₹5000 — no high-value approval needed. Only one prior failure — not a repeated pattern. Policy approves execution."
 
@@ -133,12 +134,12 @@
 **[Point to metrics cards as they refresh]**
 
 "- Total Recovered went from 0 to 1
-- Recovery Rate jumped from 0% to 1.4%
+- Recovery Rate jumped from 0% to 4.0%
 - ₹ Recovered increased by ₹999"
 
 **[Click 2-3 more simulation buttons rapidly]**
 
-"After simulating 4 payments, we're at 5.7% recovery rate and nearly ₹4,000 recovered. In a real batch run with actual customer payments, these numbers would update automatically via Razorpay webhooks."
+"After simulating 4 payments, we're at 16.0% recovery rate and nearly ₹4,000 recovered. In a real batch run with actual customer payments, these numbers would update automatically via Razorpay webhooks."
 
 **[Show webhook endpoint code briefly if time permits]**
 
@@ -154,12 +155,13 @@
 
 **[Gesture to each metric card]**
 
-"- Started with 70 failed subscriptions representing ₹2.1 lakh at risk
+"- Started with 25 failed subscriptions representing ₹2,58,975 at risk
 - Ran batch recovery through our 5-node LangGraph workflow
-- Created 35 Razorpay payment links for immediate customer action
-- Scheduled 20 delayed retries for transient failures
-- Escalated 10 cases to human review (max retries + repeated failures)
-- Stopped 5 actions due to policy guardrails (quiet hours + high-value)
+- Created 4 Razorpay payment links for immediate customer action
+- Scheduled 9 workflow retries for transient failures (scheduling logic only - no automatic re-charging)
+- Attempted 1 immediate retry (workflow tracking only)
+- Escalated 2 cases to human review (max retries + repeated failures)
+- Stopped 11 actions due to policy guardrails (quiet hours + high-value)
 - Simulated 4 payment successes, recovering ₹3,996"
 
 **[Point to audit trail panel]**
@@ -190,7 +192,7 @@
 
 ### Before Recording
 
-1. **Pre-generate data** so you don't wait during recording. Have the dashboard loaded with 70 failures ready to go.
+1. **Pre-generate data** so you don't wait during recording. Have the dashboard loaded with 25 failures ready to go.
 
 2. **Test the flow** once or twice to ensure smooth transitions between sections. Know exactly where to scroll.
 
@@ -243,9 +245,12 @@
 **Q: Why rule-based classification instead of LLM?**  
 A: "Deterministic rules are auditable and predictable — essential for fintech. An LLM might hallucinate or change behavior between versions. That said, our architecture supports swapping in an LLM node later for hybrid approaches."
 
+**A: "Automatic retry not yet implemented. Use payment links for customer-initiated retries."** For subscription recovery, Razorpay handles automatic retries at the subscription level (T+1, T+2, T+3 days), but these aren't accessible via manual API calls. ChurnGuard's retry actions create workflow tracking records. The real recovery mechanism is the payment link creation where customers can update their card details."
+
 **Q: What happens if Razorpay API is down?**  
 A: "The provider abstraction catches exceptions and returns an error state. The workflow logs the failure and marks the action as 'failed' rather than 'pending'. Retry logic would be implemented at the batch level, not within individual workflows."
 
+**Q: Do the retry actions actually retry payments?**  
 **Q: How do you handle timezone edge cases for quiet hours?**  
 A: "We approximate IST as UTC+5 for simplicity. This could misclassify events around 8:30 AM / 9:30 PM boundaries. Production code would use `pytz` for precise timezone handling. This is listed in our Known Limitations."
 
