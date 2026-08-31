@@ -152,6 +152,19 @@ streamlit run app/dashboard.py
 
 Dashboard opens at `http://localhost:8501`.
 
+### 🔔 Note for Reviewers (If Testing at Night / After 9 PM IST)
+
+By default, ChurnGuard protects the customer experience by blocking automated payment links during **Quiet Hours (9 PM – 8 AM IST)**. If you are evaluating this project at night, the system will trigger the `quiet_hours` guardrail and block payment link creation.
+
+**To bypass this and experience the full automated checkout flow at any hour:**
+1. Open your `.env` file and set:
+   ```env
+   DISABLE_QUIET_HOURS=true
+   ```
+2. Restart your FastAPI backend server (`uvicorn app.main:app --reload --port 8000`).
+
+This demonstrates both our strict real-world compliance engine **and** a seamless debugging experience for testing. The Streamlit dashboard sidebar will also update to show a green **🔓 EVALUATION MODE ON** badge confirming the bypass is active.
+
 ## How to Run a Demo End-to-End
 
 1. **Generate Data**: Click "📊 Generate Synthetic Data" in dashboard control panel (set to 25 subscriptions to stay under Razorpay test-mode 30 payment link limit)

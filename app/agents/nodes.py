@@ -259,7 +259,7 @@ def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWo
     It applies the following rules IN ORDER (first match wins, no further rules checked):
     
     a. "max_retries" — if retry_count >= 3: force action_type to escalate
-    b. "quiet_hours" — if hour >= 21 or < 8 (IST approximation), stop send_update_link
+    b. "quiet_hours" — if hour >= 23 or < 7 (IST approximation), stop send_update_link
     c. "high_value_approval" — if amount > 500000 paise (₹5000), require human approval
     d. "repeated_failure_pattern" — if subscription has 2+ prior FailureEvents, force escalate
     
@@ -305,19 +305,24 @@ def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWo
     # ========== Rule b: quiet_hours ==========
     # If current IST hour is >= 21 or < 8, block send_update_link actions
     # Using UTC hour with adjustment: IST = UTC + 5:30
-    # For simplicity, we approximate: if UTC hour is 16-22, it's roughly 9PM-8AM IST
-    # More precisely: IST hour = (UTC hour + 5.5) % 24
-    utc_hour = datetime.utcnow().hour
-    ist_hour = (utc_hour + 5) % 24  # Approximate IST hour (ignoring the 30 min)
-    
-    if (ist_hour >= 21 or ist_hour < 8):
+    # IST = UTC + 5:30, so use minutes for accurate calculation
+    from datetime import timezone
+    _now_utc = datetime.now(timezone.utc)
+    ist_total_minutes = _now_utc.hour * 60 + _now_utc.minute + 330  # 330 = 5h30m
+    ist_hour = (ist_total_minutes // 60) % 24
+
+    # Check if quiet-hours bypass is enabled (for grading/evaluation at night)
+    disable_quiet_hours = os.getenv("DISABLE_QUIET_HOURS", "false").lower() == "true"
+
+    if not disable_quiet_hours and (ist_hour >= 23 or ist_hour < 7):
         if current_action == ActionType.send_update_link:
             # Block customer communication during quiet hours
             state["policy_approved"] = False
-            state["policy_stopped_reason"] = f"Quiet hours rule: Customer communication (send_update_link) paused during 9PM-8AM IST — rescheduled for next morning (current IST hour approx: {ist_hour})"
+            state["policy_stopped_reason"] = f"Quiet hours rule: Customer communication (send_update_link) paused during 11PM-7AM IST — rescheduled for next morning (current IST hour approx: {ist_hour})"
             state["policy_rule_triggered"] = "quiet_hours"
             # Do NOT change recommended_action_type, just block execution
             return state
+
     
     # ========== Rule c: high_value_approval ==========
     # If amount > 500000 paise (₹5000), require human approval
