@@ -190,7 +190,7 @@ else:
     🛡️ STRICT COMPLIANCE ON
     </span>
     """, unsafe_allow_html=True)
-    st.sidebar.caption("Quiet hours active (9 PM–8 AM IST). Auto payment links will block during late hours.")
+    st.sidebar.caption("Quiet hours active (10 PM–7 AM IST). Auto payment links will block during late hours.")
 
 
 # Header Section
@@ -215,11 +215,11 @@ from datetime import timezone
 _utc_now = datetime.now(timezone.utc)
 _ist_total_minutes = _utc_now.hour * 60 + _utc_now.minute + 330
 _ist_hour = (_ist_total_minutes // 60) % 24
-if _ist_hour >= 21 or _ist_hour < 8:
+if _ist_hour >= 22 or _ist_hour < 7:
     if _disable_quiet_hours:
         st.info(
             f"🔓 **Evaluation Mode Active ({_ist_hour:02d}:xx IST)** — "
-            "It's currently within Quiet Hours (9 PM–8 AM IST), but `DISABLE_QUIET_HOURS=true` is set in `.env`. "
+            "It's currently within Quiet Hours (10 PM–7 AM IST), but `DISABLE_QUIET_HOURS=true` is set in `.env`. "
             "The quiet-hours policy guardrail is **bypassed** so you can experience the full automated payment link flow right now.",
             icon="🔓"
         )
@@ -227,10 +227,10 @@ if _ist_hour >= 21 or _ist_hour < 8:
         st.warning(
             f"🌙 **Quiet Hours Active ({_ist_hour:02d}:xx IST)** — "
             "ChurnGuard will not send payment links or customer notifications right now. "
-            "We don't want to disturb customers between **9 PM and 8 AM IST**. "
+            "We don't want to disturb customers between **10 PM and 7 AM IST**. "
             "Any `send_update_link` actions triggered during this window are automatically "
-            "held by the policy guardrail and will be retried at 8 AM. "
-            "This is by design — come back after 8 AM to see payment links being created!",
+            "held by the policy guardrail and will be retried at 7 AM. "
+            "This is by design — come back after 7 AM to see payment links being created!",
             icon="🌙"
         )
 
@@ -352,7 +352,7 @@ with tab_ops:
         st.write("#### 🛡️ Compliance Policy Guardrails")
         st.write("Active safety constraints mapped on conditional LangGraph routing edges:")
         with st.container(border=True):
-            st.markdown("🚫 **Quiet Hours Guard:** Delayed action between `9 PM – 8 AM IST` for notification compliance.")
+            st.markdown("🚫 **Quiet Hours Guard:** Delayed action between `10 PM – 7 AM IST` for notification compliance.")
             st.markdown("💰 **High-Value Approval Guard:** Halts automated links and demands human authorization for values `> ₹5,000`.")
             st.markdown("🔁 **Max Retries Guard:** Disables endless retry loops and escalates immediately after `3 failures`.")
             st.markdown("📉 **Repeated Failure Pattern:** Escalates to review if subscription reports `2+ failure events`.")

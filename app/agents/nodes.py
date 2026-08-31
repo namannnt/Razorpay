@@ -259,7 +259,7 @@ def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWo
     It applies the following rules IN ORDER (first match wins, no further rules checked):
     
     a. "max_retries" — if retry_count >= 3: force action_type to escalate
-    b. "quiet_hours" — if hour >= 21 or < 8 (IST approximation), stop send_update_link
+    b. "quiet_hours" — if hour >= 22 or < 7 (IST approximation), stop send_update_link
     c. "high_value_approval" — if amount > 500000 paise (₹5000), require human approval
     d. "repeated_failure_pattern" — if subscription has 2+ prior FailureEvents, force escalate
     
@@ -314,11 +314,11 @@ def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWo
     # Check if quiet-hours bypass is enabled (for grading/evaluation at night)
     disable_quiet_hours = os.getenv("DISABLE_QUIET_HOURS", "false").lower() == "true"
 
-    if not disable_quiet_hours and (ist_hour >= 21 or ist_hour < 8):
+    if not disable_quiet_hours and (ist_hour >= 22 or ist_hour < 7):
         if current_action == ActionType.send_update_link:
             # Block customer communication during quiet hours
             state["policy_approved"] = False
-            state["policy_stopped_reason"] = f"Quiet hours rule: Customer communication (send_update_link) paused during 9PM-8AM IST — rescheduled for next morning (current IST hour approx: {ist_hour})"
+            state["policy_stopped_reason"] = f"Quiet hours rule: Customer communication (send_update_link) paused during 10PM-7AM IST — rescheduled for next morning (current IST hour approx: {ist_hour})"
             state["policy_rule_triggered"] = "quiet_hours"
             # Do NOT change recommended_action_type, just block execution
             return state
