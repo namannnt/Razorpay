@@ -591,7 +591,7 @@ class TestPolicyGuards:
         ist_hour = (datetime.utcnow().hour + 5) % 24
         
         # If we're in quiet hours, should be stopped
-        if ist_hour >= 22 or ist_hour < 7:
+        if ist_hour >= 22 or ist_hour < 7: # Changed to match 10 PM - 7 AM
             assert result["policy_approved"] is False
             assert result["policy_stopped_reason"] is not None
             assert "quiet hours" in result["policy_stopped_reason"].lower()

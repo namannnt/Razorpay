@@ -210,12 +210,12 @@ else:
     with col_status:
         st.markdown("<span class='badge badge-success'>🟢 SYSTEM ONLINE</span>", unsafe_allow_html=True)
 
-# Quiet Hours Banner — shown whenever the IST hour is inside the 9PM–8AM block
+# Quiet Hours Banner — shown whenever the IST hour is inside the 10PM–7AM block
 from datetime import timezone
 _utc_now = datetime.now(timezone.utc)
 _ist_total_minutes = _utc_now.hour * 60 + _utc_now.minute + 330
 _ist_hour = (_ist_total_minutes // 60) % 24
-if _ist_hour >= 22 or _ist_hour < 7:
+if _ist_hour >= 22 or _ist_hour < 7: # Changed to 22/7
     if _disable_quiet_hours:
         st.info(
             f"🔓 **Evaluation Mode Active ({_ist_hour:02d}:xx IST)** — "
@@ -229,8 +229,7 @@ if _ist_hour >= 22 or _ist_hour < 7:
             "ChurnGuard will not send payment links or customer notifications right now. "
             "We don't want to disturb customers between **10 PM and 7 AM IST**. "
             "Any `send_update_link` actions triggered during this window are automatically "
-            "held by the policy guardrail and will be retried at 7 AM. "
-            "This is by design — come back after 7 AM to see payment links being created!",
+            "held by the policy guardrail and will be retried at 7 AM.",
             icon="🌙"
         )
 

@@ -313,8 +313,7 @@ def check_policy_guards(state: RecoveryWorkflowState, db: Session) -> RecoveryWo
 
     # Check if quiet-hours bypass is enabled (for grading/evaluation at night)
     disable_quiet_hours = os.getenv("DISABLE_QUIET_HOURS", "false").lower() == "true"
-
-    if not disable_quiet_hours and (ist_hour >= 22 or ist_hour < 7):
+    if not disable_quiet_hours and (ist_hour >= 22 or ist_hour < 7): # 10 PM to 7 AM IST
         if current_action == ActionType.send_update_link:
             # Block customer communication during quiet hours
             state["policy_approved"] = False
