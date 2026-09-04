@@ -30,36 +30,46 @@ st.sidebar.divider()
 # Constants & Backend URL Configuration
 BACKEND_URL = st.sidebar.text_input("Backend Service URL", "http://localhost:8000")
 
-# Inject Custom CSS for Premium Fintech Look
+# Inject Custom CSS — Force Light Mode + Premium Fintech Look
 st.markdown("""
 <style>
+    /* Force light mode colors globally */
     .stApp {
-        background-color: #FAFCFF;
+        background-color: #FAFCFF !important;
+        color: #121C2B !important;
     }
-    div[data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        color: #121C2B;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.9rem !important;
-        font-weight: 600 !important;
-        color: #64748B;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
+
+    /* Keep Metric Cards locked to Light Theme */
     div[data-testid="stMetric"] {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
+        background-color: #FFFFFF !important;
+        border: 1px solid #E2E8F0 !important;
         padding: 20px 24px;
         border-radius: 12px;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.01);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02) !important;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
     div[data-testid="stMetric"]:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 15px rgba(24, 90, 219, 0.05);
+        box-shadow: 0 6px 15px rgba(24, 90, 219, 0.05) !important;
     }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 700 !important;
+        color: #121C2B !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.9rem !important;
+        font-weight: 600 !important;
+        color: #64748B !important;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* Ensure sidebar remains light */
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+    }
+
     h1, h2, h3, h4 {
         color: #121C2B !important;
         font-family: 'Inter', sans-serif !important;
@@ -75,6 +85,11 @@ st.markdown("""
     .badge-pending { background-color: #E1EFFE; color: #1E429F; }
     .badge-stopped { background-color: #FDE8E8; color: #9B1C1C; }
     .badge-escalated { background-color: #FEF08A; color: #713F12; }
+
+    /* Hide Streamlit header buttons to prevent manually changing the theme */
+    header[data-testid="stHeader"] {
+        visibility: hidden;
+    }
 </style>
 """, unsafe_allow_html=True)
 
